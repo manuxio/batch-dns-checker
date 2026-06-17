@@ -25,6 +25,10 @@ queried). The last 10 batches are kept for later consultation.
 > The codebase, comments and identifiers are in English (camelCase). The UI uses
 > a **dark theme**.
 
+📖 **Full documentation:** in-depth architecture, API and component references
+live in the [DeepWiki docs](docs/deepwiki/) (start at
+[Overview](docs/deepwiki/Overview.md)).
+
 ---
 
 ## Table of contents
