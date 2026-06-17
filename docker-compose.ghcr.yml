@@ -1,0 +1,40 @@
+# Run from the published GHCR images instead of building locally.
+#
+#   IMAGE_TAG=1.0.0 docker compose -f docker-compose.ghcr.yml pull
+#   IMAGE_TAG=1.0.0 docker compose -f docker-compose.ghcr.yml up -d
+#
+# IMAGE_TAG defaults to "latest". WEB_PORT overrides the published host port.
+services:
+  server:
+    image: ghcr.io/manuxio/batch-dns-checker-server:${IMAGE_TAG:-latest}
+    container_name: coni-dns-checker-server
+    environment:
+      - PORT=3001
+      - DATA_DIR=/data
+      - DNS_TIMEOUT_MS=${DNS_TIMEOUT_MS:-5000}
+      - DNS_TRIES=${DNS_TRIES:-2}
+      - DNS_HOST_CONCURRENCY=${DNS_HOST_CONCURRENCY:-8}
+      - DNS_MAX_RETRIES=${DNS_MAX_RETRIES:-10}
+      - DNS_BACKOFF_MS=${DNS_BACKOFF_MS:-100,500,1000,2000}
+      - DNS_FORCE_LOCAL_RESOLVER=${DNS_FORCE_LOCAL_RESOLVER:-false}
+      - DNS_FALLBACK_SERVERS=${DNS_FALLBACK_SERVERS:-}
+      - SOFT_MAX_RECORDS=${SOFT_MAX_RECORDS:-150}
+      - MAX_UPLOAD_BYTES=${MAX_UPLOAD_BYTES:-10485760}
+      - MAX_BATCHES=${MAX_BATCHES:-10}
+    volumes:
+      - dns_data:/data
+    expose:
+      - "3001"
+    restart: unless-stopped
+
+  web:
+    image: ghcr.io/manuxio/batch-dns-checker-web:${IMAGE_TAG:-latest}
+    container_name: coni-dns-checker-web
+    ports:
+      - "${WEB_PORT:-8080}:8080"
+    depends_on:
+      - server
+    restart: unless-stopped
+
+volumes:
+  dns_data:

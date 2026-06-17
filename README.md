@@ -3,6 +3,7 @@
 [![Build](https://github.com/manuxio/batch-dns-checker/actions/workflows/build.yml/badge.svg)](https://github.com/manuxio/batch-dns-checker/actions/workflows/build.yml)
 [![CodeQL](https://github.com/manuxio/batch-dns-checker/actions/workflows/codeql.yml/badge.svg)](https://github.com/manuxio/batch-dns-checker/actions/workflows/codeql.yml)
 [![Trivy security scan](https://github.com/manuxio/batch-dns-checker/actions/workflows/trivy.yml/badge.svg)](https://github.com/manuxio/batch-dns-checker/actions/workflows/trivy.yml)
+[![Release](https://img.shields.io/github/v/release/manuxio/batch-dns-checker?logo=github&label=release)](https://github.com/manuxio/batch-dns-checker/releases)
 
 [![Node.js](https://img.shields.io/badge/Node.js-20-339933?logo=node.js&logoColor=white)](https://nodejs.org/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
@@ -191,6 +192,20 @@ docker compose down -v     # stop and wipe stored batches
 ```
 
 A ready‑to‑upload sample is provided at [`samples/esempio-dns.csv`](samples/esempio-dns.csv).
+
+### Run from published images (GHCR)
+
+Each `vX.Y.Z` release publishes the images to the GitHub Container Registry, so
+you can deploy without building:
+
+```bash
+export IMAGE_TAG=1.0.0          # or "latest"
+docker compose -f docker-compose.ghcr.yml pull
+docker compose -f docker-compose.ghcr.yml up -d
+```
+
+Images: `ghcr.io/manuxio/batch-dns-checker-server` and
+`ghcr.io/manuxio/batch-dns-checker-web` (tags: `X.Y.Z`, `X.Y`, `X`, `latest`).
 
 ---
 
