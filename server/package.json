@@ -33,5 +33,15 @@
     "@types/swagger-ui-express": "^4.1.7",
     "ts-node-dev": "^2.0.0",
     "typescript": "^5.7.3"
+  },
+  "comments": {
+    "overrides": "Patch transitive CVEs. tar/cross-spawn/glob/minimatch come from better-sqlite3's prebuild-install (install-time only, not used at runtime); uuid comes from exceljs."
+  },
+  "overrides": {
+    "cross-spawn": "^7.0.6",
+    "glob": "^10.5.0",
+    "minimatch": "^9.0.7",
+    "tar": "^7.5.11",
+    "uuid": "^11.1.1"
   }
 }

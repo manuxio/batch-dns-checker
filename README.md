@@ -31,7 +31,7 @@ queried). The last 10 batches are kept for later consultation.
 - [API](#api)
 - [Configuration](#configuration)
 - [Network requirements](#network-requirements)
-- [Dependency security notes](#dependency-security-notes)
+- [Security](#security)
 - [Project structure](#project-structure)
 
 ---
@@ -339,18 +339,45 @@ and possibly stale.
 
 ---
 
-## Dependency security notes
+## Security
 
-`npm audit` reports a few **transitive** advisories that are **not exploitable**
-here:
+CI runs SAST and dependency/IaC scanning on every push/PR (see
+[`.github/workflows`](.github/workflows)):
 
-- **server** — `exceljs` → `uuid <11.1.1` (moderate): only affects UUID v3/v5/v6
-  with a `buf` argument; exceljs uses v4 without it. (The original `xlsx`/SheetJS
-  high‑severity ReDoS in the file‑parsing path was removed by switching to
-  `exceljs`.)
-- **web** — `vite` → `esbuild` (moderate/high): affects only the **Vite dev
-  server**. Production serves static files via nginx; Vite/esbuild are not in the
-  runtime image.
+- **CodeQL** (`codeql.yml`) — JavaScript/TypeScript static analysis
+  (`security-and-quality`), results in the **Security** tab.
+- **Trivy** (`trivy.yml`) — filesystem scan for dependency vulns, secrets and
+  Dockerfile/compose misconfigurations, SARIF uploaded to the Security tab.
+- **Build** (`build.yml`) — type-check/build server, web and the Docker images,
+  plus `npm audit`.
+
+> Code scanning results (CodeQL/Trivy SARIF) appear in the Security tab for
+> public repos automatically; for **private** repos this requires GitHub
+> Advanced Security.
+
+A full local SAST + DAST pass was run and remediated:
+
+- **Dependencies (`npm audit`): 0 vulnerabilities.** Transitive CVEs are pinned
+  via `overrides` (`cross-spawn`, `glob`, `minimatch`, `tar`, `uuid`). The
+  earlier `xlsx`/SheetJS ReDoS was removed by switching to `exceljs`.
+- **Container images (Trivy):** the web image has **0** HIGH/CRITICAL; the
+  server image carries **0** Node-package CVEs (npm is removed from the runtime
+  image, and the app runs node-only). OS-package patches are applied
+  (`apt-get upgrade` / `apk upgrade`); a handful of Debian base CVEs remain that
+  upstream marks `will_not_fix`/`fix_deferred` (e.g. zlib, perl) — not reachable
+  from this app.
+- **DAST (OWASP ZAP baseline): 0 alerts.** nginx sets a strict CSP (relaxed only
+  for Swagger UI), `X-Frame-Options`, `X-Content-Type-Options`,
+  `Referrer-Policy`, `Permissions-Policy`, `Cross-Origin-Opener-Policy`, and
+  hides its version (`server_tokens off`). Remaining ZAP items are informational
+  (e.g. cacheable static assets, `style-src 'unsafe-inline'` required by Ant
+  Design's runtime styles).
+- **Dev-only:** `vite` → `esbuild` advisories affect only the Vite dev server;
+  esbuild/Vite are not present in the nginx runtime image.
+
+Recommended further hardening (not yet applied): run the containers as a
+non-root `USER` (Trivy `DS-0002`). This needs an init step to `chown` the
+SQLite volume for the server and the unprivileged nginx image for the web tier.
 
 ---
 
