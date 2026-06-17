@@ -1,0 +1,130 @@
+{
+  "app": {
+    "title": "CONI SVC DNS Checker",
+    "subtitle": "Verifica DNS autoritativa"
+  },
+  "nav": {
+    "newCheck": "Nuova verifica",
+    "history": "Storico",
+    "apiDocs": "API Docs"
+  },
+  "common": {
+    "loading": "Caricamento…",
+    "refresh": "Aggiorna",
+    "delete": "Elimina",
+    "open": "Apri",
+    "back": "Indietro",
+    "cancel": "Annulla",
+    "download": "Scarica",
+    "actions": "Azioni",
+    "none": "—",
+    "yes": "Sì",
+    "no": "No"
+  },
+  "upload": {
+    "title": "Carica un file e avvia la verifica",
+    "description": "Carica un file CSV o Excel con le colonne hostname, type, value. L'applicazione verifica che ogni hostname sia risolto da TUTTI i name server autoritativi con il tipo e il valore attesi.",
+    "dropText": "Trascina qui il file oppure clicca per selezionarlo",
+    "dropHint": "Formati supportati: .csv, .xlsx, .xls",
+    "batchName": "Nome del batch (opzionale)",
+    "batchNamePlaceholder": "es. Verifica zone CONI giugno",
+    "start": "Avvia verifica",
+    "templateTitle": "Modello di esempio",
+    "downloadTemplateXlsx": "Modello Excel",
+    "downloadTemplateCsv": "Modello CSV",
+    "supportedTypes": "Tipi di record supportati",
+    "softLimitNote": "Limite consigliato: {{count}} record per batch. File più grandi sono accettati ma la verifica può richiedere più tempo.",
+    "noFile": "Seleziona prima un file.",
+    "started": "Verifica avviata.",
+    "softLimitExceeded": "Il file supera il limite consigliato di {{count}} record: la verifica è stata avviata ugualmente ma potrebbe richiedere più tempo."
+  },
+  "errors": {
+    "parseFailed": "Impossibile leggere il file. Controlla intestazioni e formato.",
+    "noValidRows": "Nessuna riga valida trovata nel file.",
+    "noFileUploaded": "Nessun file caricato.",
+    "fileTooLarge": "File troppo grande.",
+    "batchNotFound": "Batch non trovato.",
+    "generic": "Si è verificato un errore."
+  },
+  "batch": {
+    "progress": "Avanzamento",
+    "stop": "Interrompi",
+    "stopConfirm": "Interrompere il batch in corso?",
+    "stopRequested": "Interruzione richiesta.",
+    "createdAt": "Creato il",
+    "startedAt": "Avviato il",
+    "finishedAt": "Completato il",
+    "file": "File",
+    "name": "Nome",
+    "downloadXlsx": "Scarica Excel",
+    "downloadCsv": "Scarica CSV",
+    "groupedByDomain": "Risultati per dominio di secondo livello",
+    "invalidRows": "Righe non valide ({{count}})",
+    "invalidRowsDesc": "Queste righe sono state ignorate durante la verifica.",
+    "noResults": "Nessun risultato.",
+    "checkingTitle": "Verifica in corso…"
+  },
+  "table": {
+    "hostname": "Hostname",
+    "type": "Tipo",
+    "expected": "Valore atteso",
+    "status": "Esito",
+    "nameservers": "Name server autoritativi",
+    "details": "Dettaglio per name server",
+    "warnings": "Avvisi",
+    "zone": "Zona",
+    "returned": "Valori restituiti",
+    "row": "Riga",
+    "error": "Errore",
+    "nsName": "Name server",
+    "nsIp": "IP"
+  },
+  "status": {
+    "pending": "In attesa",
+    "running": "In corso",
+    "completed": "Completato",
+    "stopped": "Interrotto",
+    "interrupted": "Interrotto (riavvio)",
+    "error": "Errore",
+    "ok": "Corretto",
+    "warning": "Avviso",
+    "cancelled": "Annullato"
+  },
+  "nsStatus": {
+    "ok": "Corretto",
+    "mismatch": "Non corrispondente",
+    "error": "Errore",
+    "timeout": "Timeout"
+  },
+  "warning": {
+    "someNameserversUnreachable": "Alcuni name server non raggiungibili",
+    "extraRecordsPresent": "Presenti record aggiuntivi oltre al valore atteso",
+    "inconsistentAcrossNameservers": "Risposte incoerenti tra i name server"
+  },
+  "message": {
+    "noAuthoritativeNameservers": "Nessun name server autoritativo trovato",
+    "nsIpResolutionFailed": "Impossibile risolvere l'IP del name server"
+  },
+  "invalid": {
+    "emptyHostname": "Hostname mancante",
+    "invalidHostname": "Hostname non valido",
+    "emptyType": "Tipo mancante",
+    "unsupportedType": "Tipo non supportato",
+    "emptyValue": "Valore mancante"
+  },
+  "counts": {
+    "ok": "Corretti",
+    "warning": "Avvisi",
+    "error": "Errori",
+    "cancelled": "Annullati",
+    "total": "Totale",
+    "invalid": "Non validi"
+  },
+  "history": {
+    "title": "Storico verifiche",
+    "empty": "Nessun batch presente.",
+    "max": "Vengono conservati gli ultimi {{count}} batch.",
+    "deleted": "Batch eliminato.",
+    "deleteConfirm": "Eliminare questo batch?"
+  }
+}

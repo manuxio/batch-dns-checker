@@ -1,0 +1,35 @@
+{
+  "name": "coni-svc-dns-checker-server",
+  "version": "1.0.0",
+  "private": true,
+  "description": "CONI SVC DNS Checker - backend API",
+  "license": "UNLICENSED",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/index.js",
+    "dev": "ts-node-dev --respawn --transpile-only src/index.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "better-sqlite3": "^11.8.1",
+    "cors": "^2.8.5",
+    "exceljs": "^4.4.0",
+    "express": "^4.21.2",
+    "multer": "^2.0.2",
+    "papaparse": "^5.4.1",
+    "swagger-ui-express": "^5.0.1",
+    "tldts": "^6.1.71"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.12",
+    "@types/cors": "^2.8.17",
+    "@types/express": "^4.17.21",
+    "@types/multer": "^1.4.12",
+    "@types/node": "^20.17.12",
+    "@types/papaparse": "^5.3.15",
+    "@types/swagger-ui-express": "^4.1.7",
+    "ts-node-dev": "^2.0.0",
+    "typescript": "^5.7.3"
+  }
+}

@@ -1,0 +1,130 @@
+{
+  "app": {
+    "title": "CONI SVC DNS Checker",
+    "subtitle": "Authoritative DNS verification"
+  },
+  "nav": {
+    "newCheck": "New check",
+    "history": "History",
+    "apiDocs": "API Docs"
+  },
+  "common": {
+    "loading": "Loading…",
+    "refresh": "Refresh",
+    "delete": "Delete",
+    "open": "Open",
+    "back": "Back",
+    "cancel": "Cancel",
+    "download": "Download",
+    "actions": "Actions",
+    "none": "—",
+    "yes": "Yes",
+    "no": "No"
+  },
+  "upload": {
+    "title": "Upload a file and start the check",
+    "description": "Upload a CSV or Excel file with the columns hostname, type, value. The application verifies that each hostname resolves, on ALL of its authoritative nameservers, to the expected type and value.",
+    "dropText": "Drag a file here or click to select it",
+    "dropHint": "Supported formats: .csv, .xlsx, .xls",
+    "batchName": "Batch name (optional)",
+    "batchNamePlaceholder": "e.g. CONI zones check June",
+    "start": "Start check",
+    "templateTitle": "Sample template",
+    "downloadTemplateXlsx": "Excel template",
+    "downloadTemplateCsv": "CSV template",
+    "supportedTypes": "Supported record types",
+    "softLimitNote": "Recommended limit: {{count}} records per batch. Larger files are accepted but the check may take longer.",
+    "noFile": "Please select a file first.",
+    "started": "Check started.",
+    "softLimitExceeded": "The file exceeds the recommended limit of {{count}} records: the check started anyway but may take longer."
+  },
+  "errors": {
+    "parseFailed": "Could not read the file. Check the headers and format.",
+    "noValidRows": "No valid rows found in the file.",
+    "noFileUploaded": "No file uploaded.",
+    "fileTooLarge": "File too large.",
+    "batchNotFound": "Batch not found.",
+    "generic": "An error occurred."
+  },
+  "batch": {
+    "progress": "Progress",
+    "stop": "Stop",
+    "stopConfirm": "Stop the running batch?",
+    "stopRequested": "Stop requested.",
+    "createdAt": "Created at",
+    "startedAt": "Started at",
+    "finishedAt": "Finished at",
+    "file": "File",
+    "name": "Name",
+    "downloadXlsx": "Download Excel",
+    "downloadCsv": "Download CSV",
+    "groupedByDomain": "Results by secondary-level domain",
+    "invalidRows": "Invalid rows ({{count}})",
+    "invalidRowsDesc": "These rows were skipped during the check.",
+    "noResults": "No results.",
+    "checkingTitle": "Check in progress…"
+  },
+  "table": {
+    "hostname": "Hostname",
+    "type": "Type",
+    "expected": "Expected value",
+    "status": "Result",
+    "nameservers": "Authoritative nameservers",
+    "details": "Per-nameserver detail",
+    "warnings": "Warnings",
+    "zone": "Zone",
+    "returned": "Returned values",
+    "row": "Row",
+    "error": "Error",
+    "nsName": "Nameserver",
+    "nsIp": "IP"
+  },
+  "status": {
+    "pending": "Pending",
+    "running": "Running",
+    "completed": "Completed",
+    "stopped": "Stopped",
+    "interrupted": "Interrupted (restart)",
+    "error": "Error",
+    "ok": "Correct",
+    "warning": "Warning",
+    "cancelled": "Cancelled"
+  },
+  "nsStatus": {
+    "ok": "Correct",
+    "mismatch": "Mismatch",
+    "error": "Error",
+    "timeout": "Timeout"
+  },
+  "warning": {
+    "someNameserversUnreachable": "Some nameservers unreachable",
+    "extraRecordsPresent": "Extra records present beyond the expected value",
+    "inconsistentAcrossNameservers": "Inconsistent answers across nameservers"
+  },
+  "message": {
+    "noAuthoritativeNameservers": "No authoritative nameservers found",
+    "nsIpResolutionFailed": "Could not resolve nameserver IP"
+  },
+  "invalid": {
+    "emptyHostname": "Missing hostname",
+    "invalidHostname": "Invalid hostname",
+    "emptyType": "Missing type",
+    "unsupportedType": "Unsupported type",
+    "emptyValue": "Missing value"
+  },
+  "counts": {
+    "ok": "Correct",
+    "warning": "Warnings",
+    "error": "Errors",
+    "cancelled": "Cancelled",
+    "total": "Total",
+    "invalid": "Invalid"
+  },
+  "history": {
+    "title": "Check history",
+    "empty": "No batches yet.",
+    "max": "The last {{count}} batches are retained.",
+    "deleted": "Batch deleted.",
+    "deleteConfirm": "Delete this batch?"
+  }
+}

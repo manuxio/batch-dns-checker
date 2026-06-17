@@ -1,0 +1,46 @@
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+.app-header {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 0 24px;
+}
+
+.app-header__title {
+  color: #fff;
+  font-size: 18px;
+  font-weight: 600;
+  white-space: nowrap;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.app-header__menu {
+  flex: 1;
+  min-width: 0;
+}
+
+.app-content {
+  max-width: 1180px;
+  width: 100%;
+  margin: 0 auto;
+  padding: 24px;
+  box-sizing: border-box;
+}
+
+.app-footer {
+  text-align: center;
+}
+
+.ns-detail-values {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+  word-break: break-all;
+}
