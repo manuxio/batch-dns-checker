@@ -114,10 +114,12 @@ export function normalizeExpected(type: RecordType, rawValue: string): string {
       return value.toLowerCase();
     }
     case 'CAA': {
-      // "flags tag value" e.g. 0 issue "letsencrypt.org"
-      const match = value.match(/^(\d+)\s+(\w+)\s+(.+)$/);
-      if (match) {
-        return `${match[1]} ${match[2].toLowerCase()} ${unquote(match[3])}`;
+      // "flags tag value" e.g. 0 issue "letsencrypt.org".
+      // Split-based parsing avoids a polynomial-backtracking regex (ReDoS).
+      const parts = value.split(/\s+/);
+      if (parts.length >= 3 && /^\d+$/.test(parts[0])) {
+        const [flags, tag, ...rest] = parts;
+        return `${flags} ${tag.toLowerCase()} ${unquote(rest.join(' '))}`;
       }
       return value.toLowerCase();
     }
@@ -222,14 +224,17 @@ export function parseExpectation(
   const hasAnd = /\s&\s/.test(raw);
   const hasOr = /\s\|\s/.test(raw);
 
+  // Split on the literal operator and trim each part. Detection above already
+  // requires the operator to be whitespace-surrounded; splitting on the literal
+  // char (instead of a \s+OP\s+ regex) avoids polynomial backtracking (ReDoS).
   let mode: MatchMode = 'single';
   let parts = [raw];
   if (hasAnd && !hasOr) {
     mode = 'all';
-    parts = raw.split(/\s+&\s+/);
+    parts = raw.split('&').map((part) => part.trim());
   } else if (hasOr && !hasAnd) {
     mode = 'any';
-    parts = raw.split(/\s+\|\s+/);
+    parts = raw.split('|').map((part) => part.trim());
   }
 
   const values = parts

@@ -374,10 +374,14 @@ A full local SAST + DAST pass was run and remediated:
   Design's runtime styles).
 - **Dev-only:** `vite` → `esbuild` advisories affect only the Vite dev server;
   esbuild/Vite are not present in the nginx runtime image.
+- **Hardening applied:** both containers run as **non-root** (the server as
+  `node`; the web tier on the unprivileged nginx image listening on `8080`),
+  each with a `HEALTHCHECK`. ReDoS findings from CodeQL were fixed by replacing
+  backtracking regexes with linear split-based parsing.
 
-Recommended further hardening (not yet applied): run the containers as a
-non-root `USER` (Trivy `DS-0002`). This needs an init step to `chown` the
-SQLite volume for the server and the unprivileged nginx image for the web tier.
+> Note: the server runs as `node` and owns its `/data` volume. An existing
+> deployment created before this change must reinitialize the volume once
+> (`docker compose down -v`) so the SQLite directory is writable by `node`.
 
 ---
 

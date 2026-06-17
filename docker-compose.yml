@@ -26,8 +26,9 @@ services:
     container_name: coni-dns-checker-web
     # Only the web container publishes a host port. Override WEB_PORT in a .env
     # file (or the environment) if 8080 is already taken on this box.
+    # Container listens on 8080 (non-root unprivileged nginx).
     ports:
-      - "${WEB_PORT:-8080}:80"
+      - "${WEB_PORT:-8080}:8080"
     depends_on:
       - server
     restart: unless-stopped
