@@ -93,10 +93,11 @@ function createPinnedResolver(ip: string): Resolver {
 export interface DnsCache {
   zones: Map<string, string[]>; // candidate name -> NS names (possibly empty)
   nsIps: Map<string, string[]>; // NS name -> IP addresses
+  soa: Map<string, string | null>; // candidate name -> SOA primary master
 }
 
 export function createDnsCache(): DnsCache {
-  return { zones: new Map(), nsIps: new Map() };
+  return { zones: new Map(), nsIps: new Map(), soa: new Map() };
 }
 
 async function lookupNs(
@@ -118,24 +119,62 @@ async function lookupNs(
   }
 }
 
+/** Returns the SOA primary master (MNAME) for a name, or null. */
+async function lookupSoaPrimary(
+  resolver: Resolver,
+  name: string,
+  cache: DnsCache,
+): Promise<string | null> {
+  const cached = cache.soa.get(name);
+  if (cached !== undefined) return cached;
+  try {
+    const soa = await withRetry(() => resolver.resolveSoa(name));
+    const primary = soa.nsname ? normalizeHostname(soa.nsname) : null;
+    cache.soa.set(name, primary);
+    return primary;
+  } catch {
+    cache.soa.set(name, null);
+    return null;
+  }
+}
+
+export interface ZoneLookup {
+  zone: string | null;
+  nameservers: string[];
+  /** True when NS records were absent and we fell back to the SOA primary. */
+  viaSoa: boolean;
+}
+
 /**
- * Finds the authoritative nameservers for a hostname by walking from the most
- * specific candidate zone down to the registrable domain and returning the
- * first (deepest) name that owns NS records.
+ * Finds the authoritative nameservers for a hostname.
+ *  1) Walk from the most specific candidate zone down to the registrable domain
+ *     and return the first name that publishes NS records (the normal case).
+ *  2) Fallback: some zones are delegated but publish no apex NS records (only an
+ *     SOA). In that case resolve the SOA of the closest enclosing zone and use
+ *     its primary master, so the records can still be verified.
  */
 async function findAuthoritativeNameservers(
   hostname: string,
   resolver: Resolver,
   cache: DnsCache,
-): Promise<{ zone: string | null; nameservers: string[] }> {
+): Promise<ZoneLookup> {
   const candidates = buildZoneCandidates(hostname);
+
   for (const candidate of candidates) {
     const ns = await lookupNs(resolver, candidate, cache);
     if (ns.length > 0) {
-      return { zone: candidate, nameservers: ns };
+      return { zone: candidate, nameservers: ns, viaSoa: false };
     }
   }
-  return { zone: null, nameservers: [] };
+
+  for (const candidate of candidates) {
+    const primary = await lookupSoaPrimary(resolver, candidate, cache);
+    if (primary) {
+      return { zone: candidate, nameservers: [primary], viaSoa: true };
+    }
+  }
+
+  return { zone: null, nameservers: [], viaSoa: false };
 }
 
 async function resolveNsIps(
@@ -465,7 +504,7 @@ export async function checkHost(
     warnings: [],
   };
 
-  const { zone, nameservers } = await findAuthoritativeNameservers(
+  const { zone, nameservers, viaSoa } = await findAuthoritativeNameservers(
     queryName,
     defaultResolver,
     cache,
@@ -506,7 +545,16 @@ export async function checkHost(
   }
 
   base.nsAnswers = nsAnswers;
-  return aggregate(base);
+  const result = aggregate(base);
+
+  // The zone publishes no apex NS records; we verified against the SOA primary
+  // master only. Surface it as an advisory without hiding a correct value.
+  if (viaSoa) {
+    result.warnings.push('noApexNsRecords');
+    if (result.status === 'ok') result.status = 'warning';
+  }
+
+  return result;
 }
 
 /** Combines per-NS answers into the overall host status + warnings. */
