@@ -1,5 +1,16 @@
 # CONI SVC DNS Checker
 
+[![Build](https://github.com/manuxio/batch-dns-checker/actions/workflows/build.yml/badge.svg)](https://github.com/manuxio/batch-dns-checker/actions/workflows/build.yml)
+[![CodeQL](https://github.com/manuxio/batch-dns-checker/actions/workflows/codeql.yml/badge.svg)](https://github.com/manuxio/batch-dns-checker/actions/workflows/codeql.yml)
+[![Trivy security scan](https://github.com/manuxio/batch-dns-checker/actions/workflows/trivy.yml/badge.svg)](https://github.com/manuxio/batch-dns-checker/actions/workflows/trivy.yml)
+
+[![Node.js](https://img.shields.io/badge/Node.js-20-339933?logo=node.js&logoColor=white)](https://nodejs.org/)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
+[![React](https://img.shields.io/badge/React-18-61DAFB?logo=react&logoColor=black)](https://react.dev/)
+[![Ant Design](https://img.shields.io/badge/Ant%20Design-5-0170FE?logo=antdesign&logoColor=white)](https://ant.design/)
+[![Express](https://img.shields.io/badge/Express-4-000000?logo=express&logoColor=white)](https://expressjs.com/)
+[![Docker](https://img.shields.io/badge/Docker-Compose-2496ED?logo=docker&logoColor=white)](https://docs.docker.com/compose/)
+
 A dockerized web app + REST API to **verify that third‑party domain owners have
 applied the DNS changes you requested** — i.e. that a list of hostnames resolves,
 on **all** of their authoritative nameservers, to the **type** and **value** you
