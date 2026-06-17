@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import {
   Alert,
@@ -9,12 +9,14 @@ import {
   Popconfirm,
   Space,
   Table,
+  Tooltip,
   Typography,
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import {
   DeleteOutlined,
   FileExcelOutlined,
+  RedoOutlined,
   ReloadOutlined,
 } from '@ant-design/icons';
 import {
@@ -23,6 +25,7 @@ import {
   exportUrl,
   getConfig,
   listBatches,
+  rerunBatch,
 } from '../api/client';
 import type { BatchSummary } from '../api/types';
 import { StatusTag } from '../components/StatusTag';
@@ -31,6 +34,7 @@ import { CountsSummary } from '../components/CountsSummary';
 export function HistoryPage() {
   const { t, i18n } = useTranslation();
   const { message } = AntApp.useApp();
+  const navigate = useNavigate();
 
   const [batches, setBatches] = useState<BatchSummary[]>([]);
   const [loading, setLoading] = useState(true);
@@ -61,6 +65,17 @@ export function HistoryPage() {
       await deleteBatch(id);
       message.success(t('history.deleted'));
       await load();
+    } catch (err) {
+      const code = err instanceof ApiRequestError ? err.code : 'generic';
+      message.error(t(`errors.${code}`, t('errors.generic')));
+    }
+  };
+
+  const handleRerun = async (id: string) => {
+    try {
+      const batch = await rerunBatch(id);
+      message.success(t('batch.rerunStarted'));
+      navigate(`/batches/${batch.id}`);
     } catch (err) {
       const code = err instanceof ApiRequestError ? err.code : 'generic';
       message.error(t(`errors.${code}`, t('errors.generic')));
@@ -105,15 +120,24 @@ export function HistoryPage() {
     {
       title: t('common.actions'),
       key: 'actions',
-      width: 160,
+      width: 180,
       render: (_, row) => (
         <Space>
-          <Button
-            size="small"
-            icon={<FileExcelOutlined />}
-            href={exportUrl(row.id, 'xlsx')}
-            disabled={row.status === 'running' || row.status === 'pending'}
-          />
+          <Tooltip title={t('batch.rerun')}>
+            <Button
+              size="small"
+              icon={<RedoOutlined />}
+              onClick={() => handleRerun(row.id)}
+            />
+          </Tooltip>
+          <Tooltip title={t('batch.downloadXlsx')}>
+            <Button
+              size="small"
+              icon={<FileExcelOutlined />}
+              href={exportUrl(row.id, 'xlsx')}
+              disabled={row.status === 'running' || row.status === 'pending'}
+            />
+          </Tooltip>
           <Popconfirm
             title={t('history.deleteConfirm')}
             okText={t('common.yes')}

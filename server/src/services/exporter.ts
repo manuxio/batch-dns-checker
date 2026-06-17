@@ -10,8 +10,10 @@ import type { Batch, HostResult } from '../types';
 const HEADERS = [
   'secondaryLevelDomain',
   'hostname',
+  'queryName',
   'type',
   'expectedValue',
+  'matchMode',
   'status',
   'warnings',
   'zone',
@@ -40,8 +42,10 @@ function toMatrix(batch: Batch): string[][] {
     rows.push([
       result.registrableDomain,
       result.hostname,
+      result.queryName ?? result.hostname,
       result.type,
       result.expectedValue,
+      result.matchMode ?? 'single',
       result.status,
       result.warnings.join(', '),
       result.zone ?? '',
@@ -56,8 +60,10 @@ function toMatrix(batch: Batch): string[][] {
     rows.push([
       '',
       String(invalid.raw.hostname ?? invalid.raw.host ?? ''),
+      '',
       String(invalid.raw.type ?? ''),
       String(invalid.raw.value ?? ''),
+      '',
       'invalid',
       invalid.error,
       '',
@@ -75,20 +81,22 @@ export async function exportBatchXlsx(batch: Batch): Promise<Buffer> {
   const sheet = workbook.addWorksheet('results');
   for (const row of toMatrix(batch)) sheet.addRow(row);
   sheet.columns = [
-    { width: 24 },
-    { width: 30 },
-    { width: 8 },
-    { width: 30 },
-    { width: 10 },
-    { width: 28 },
-    { width: 22 },
-    { width: 36 },
-    { width: 60 },
-    { width: 24 },
+    { width: 24 }, // secondaryLevelDomain
+    { width: 30 }, // hostname
+    { width: 30 }, // queryName
+    { width: 8 }, // type
+    { width: 30 }, // expectedValue
+    { width: 10 }, // matchMode
+    { width: 10 }, // status
+    { width: 28 }, // warnings
+    { width: 22 }, // zone
+    { width: 36 }, // authoritativeNameservers
+    { width: 60 }, // nameserverDetails
+    { width: 24 }, // message
   ];
   sheet.getRow(1).font = { bold: true };
   // Wrap the multi-line per-nameserver detail column for readability.
-  sheet.getColumn(9).alignment = { wrapText: true, vertical: 'top' };
+  sheet.getColumn(11).alignment = { wrapText: true, vertical: 'top' };
   const buffer = await workbook.xlsx.writeBuffer();
   return Buffer.from(buffer);
 }

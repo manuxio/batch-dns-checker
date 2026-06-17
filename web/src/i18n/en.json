@@ -44,7 +44,34 @@
     "noFileUploaded": "No file uploaded.",
     "fileTooLarge": "File too large.",
     "batchNotFound": "Batch not found.",
+    "invalidInput": "Invalid input. Check hostname, type and value.",
     "generic": "An error occurred."
+  },
+  "singleCheck": {
+    "title": "Single check",
+    "description": "Quickly test a single record without creating a batch.",
+    "hostname": "Hostname",
+    "hostnamePlaceholder": "e.g. example.it",
+    "type": "Type",
+    "value": "Expected value",
+    "valuePlaceholder": "e.g. ns1.example.it & ns2.example.it",
+    "submit": "Check",
+    "resultTitle": "Result"
+  },
+  "rules": {
+    "title": "How verification works",
+    "authoritative": "Each hostname is queried on ALL authoritative nameservers of its zone.",
+    "contains": "\"Contains\" match: the expected value must be present; any extra records raise a warning.",
+    "and": "\"a & b\" → requires BOTH values (extra records remain a warning).",
+    "or": "\"a | b\" → requires AT LEAST ONE of the values and allows ONLY the listed values (e.g. accepts \"a & b\" but not \"a & c\").",
+    "operators": "The & and | operators must be written with surrounding spaces; they cannot be mixed in the same cell.",
+    "cname": "CNAME: the value is the canonical target (alias). A name with a CNAME cannot have other records and may point to a chain.",
+    "policy": "Policy types (SPF, DKIM, DMARC, MTA-STS, TLS-RPT, BIMI): TXT records at conventional names (e.g. DMARC → _dmarc.domain). For DKIM put the full selector name in the hostname (e.g. sel._domainkey.domain)."
+  },
+  "matchMode": {
+    "single": "single",
+    "all": "all (AND)",
+    "any": "one of (OR)"
   },
   "batch": {
     "progress": "Progress",
@@ -58,6 +85,8 @@
     "name": "Name",
     "downloadXlsx": "Download Excel",
     "downloadCsv": "Download CSV",
+    "rerun": "Re-run",
+    "rerunStarted": "New run started (duplicated in history).",
     "groupedByDomain": "Results by secondary-level domain",
     "invalidRows": "Invalid rows ({{count}})",
     "invalidRowsDesc": "These rows were skipped during the check.",
@@ -68,6 +97,7 @@
     "hostname": "Hostname",
     "type": "Type",
     "expected": "Expected value",
+    "queryName": "Queried name",
     "status": "Result",
     "nameservers": "Authoritative nameservers",
     "details": "Per-nameserver detail",
@@ -110,7 +140,8 @@
     "invalidHostname": "Invalid hostname",
     "emptyType": "Missing type",
     "unsupportedType": "Unsupported type",
-    "emptyValue": "Missing value"
+    "emptyValue": "Missing value",
+    "mixedOperators": "The & and | operators cannot be mixed"
   },
   "counts": {
     "ok": "Correct",

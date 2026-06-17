@@ -100,10 +100,47 @@ supportati anche `.xlsx` / `.xls`.
 | \_sip.\_tcp.example.it | SRV  | 10 60 5060 sip.example.it       |
 
 Una riga = una verifica. Per attendersi più valori sullo stesso hostname, usa
-più righe. Scarica un modello pronto dalla home (`Modello Excel` / `Modello CSV`)
-o da `GET /api/template?format=xlsx|csv`.
+più righe (oppure gli operatori `&` / `|`, vedi sotto). Scarica un modello pronto
+dalla home (`Modello Excel` / `Modello CSV`) o da `GET /api/template?format=xlsx|csv`.
 
-**Tipi supportati:** `A, AAAA, CNAME, MX, TXT, NS, SRV, CAA`.
+**Tipi standard:** `A, AAAA, CNAME, MX, TXT, NS, SRV, CAA`.
+
+**Tipi "policy"** (record TXT su nomi convenzionali): `SPF, DKIM, DMARC, MTA-STS,
+TLS-RPT, BIMI`. Per questi l'app interroga automaticamente il nome giusto e
+considera solo il record TXT pertinente (in base al marker, es. `v=DMARC1`):
+
+| Tipo     | Nome interrogato                  | Marker        |
+|----------|-----------------------------------|---------------|
+| SPF      | `<host>`                          | `v=spf1`      |
+| DMARC    | `_dmarc.<host>`                   | `v=DMARC1`    |
+| MTA-STS  | `_mta-sts.<host>`                 | `v=STSv1`     |
+| TLS-RPT  | `_smtp._tls.<host>`               | `v=TLSRPTv1`  |
+| BIMI     | `default._bimi.<host>`            | `v=BIMI1`     |
+| DKIM     | usa il nome completo del selettore in `hostname` | `v=DKIM1` |
+
+### Valori composti (`&` / `|`)
+
+Il valore atteso può combinare più valori (operatori delimitati da spazi):
+
+- **`a & b`** → richiede **entrambi** i valori (eventuali record extra restano un
+  avviso, come per il valore singolo).
+- **`a | b`** → richiede **almeno uno** dei valori **e ammette solo** i valori
+  elencati. Esempio: con `a | b`, una risposta `a & b` è accettata, mentre
+  `a & c` è considerata errata (`c` non è tra i valori ammessi).
+
+Gli operatori non possono essere mescolati nella stessa cella (riga non valida).
+
+### CNAME
+
+Per i CNAME il valore è il **target canonico** (alias). Un nome con un CNAME non
+può avere altri record e può puntare a una catena di alias. Esempio:
+`shop.example.it , CNAME , www.example.it`.
+
+### Verifica singola
+
+Dalla home è disponibile un riquadro **"Verifica singola"** per testare al volo
+un singolo record (`hostname`, `tipo`, `valore atteso`) senza creare un batch —
+corrisponde all'endpoint `POST /api/check`.
 
 ---
 
@@ -152,12 +189,14 @@ Base path: `/api` — documentazione interattiva su `/api/docs`.
 | GET    | `/config`                        | Configurazione per il client             |
 | GET    | `/record-types`                  | Tipi di record supportati                |
 | GET    | `/template?format=xlsx\|csv`     | Modello di input di esempio              |
+| POST   | `/check`                         | Verifica singola sincrona (no batch)     |
 | GET    | `/batches`                       | Ultimi 10 batch                          |
 | POST   | `/batches`                       | Upload file + avvio batch (multipart)    |
 | GET    | `/batches/:id`                   | Batch completo con risultati             |
 | GET    | `/batches/:id/status`            | Avanzamento (per polling)                |
 | GET    | `/batches/:id/groups`            | Risultati per dominio di secondo livello |
 | POST   | `/batches/:id/stop`              | Richiede l'interruzione                  |
+| POST   | `/batches/:id/rerun`             | Ripete il batch (duplicato nello storico)|
 | DELETE | `/batches/:id`                   | Elimina un batch                         |
 | GET    | `/batches/:id/export?format=...` | Scarica i risultati (incl. NS interrogati)|
 

@@ -224,6 +224,67 @@ export const openapiSpec = {
         },
       },
     },
+    '/batches/{id}/rerun': {
+      post: {
+        tags: ['Batches'],
+        summary: 'Re-run a batch (clones its rows into a new, duplicated batch)',
+        parameters: [{ $ref: '#/components/parameters/BatchId' }],
+        responses: {
+          '201': {
+            description: 'New batch created and started',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/Batch' },
+              },
+            },
+          },
+          '404': { description: 'Source batch not found' },
+        },
+      },
+    },
+    '/check': {
+      post: {
+        tags: ['Batches'],
+        summary: 'Verify a single record synchronously (no persistence)',
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['hostname', 'type', 'value'],
+                properties: {
+                  hostname: { type: 'string', example: 'example.it' },
+                  type: { type: 'string', enum: [...SUPPORTED_RECORD_TYPES] },
+                  value: {
+                    type: 'string',
+                    example: 'ns1.example.it & ns2.example.it',
+                  },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'Single host result',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/HostResult' },
+              },
+            },
+          },
+          '400': {
+            description: 'Invalid input',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/Error' },
+              },
+            },
+          },
+        },
+      },
+    },
     '/batches/{id}/stop': {
       post: {
         tags: ['Batches'],
@@ -349,9 +410,20 @@ export const openapiSpec = {
         type: 'object',
         properties: {
           hostname: { type: 'string' },
+          queryName: {
+            type: 'string',
+            description:
+              'Actual FQDN queried (differs for policy types, e.g. _dmarc.<host>)',
+          },
           registrableDomain: { type: 'string' },
           type: { type: 'string', enum: [...SUPPORTED_RECORD_TYPES] },
-          expectedValue: { type: 'string' },
+          expectedValue: {
+            type: 'string',
+            description:
+              "Compound values: 'a & b' = both required; 'a | b' = at least one, " +
+              'and only listed values allowed.',
+          },
+          matchMode: { type: 'string', enum: ['single', 'all', 'any'] },
           zone: { type: 'string', nullable: true },
           authoritativeNameservers: {
             type: 'array',

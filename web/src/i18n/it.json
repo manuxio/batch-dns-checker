@@ -44,7 +44,34 @@
     "noFileUploaded": "Nessun file caricato.",
     "fileTooLarge": "File troppo grande.",
     "batchNotFound": "Batch non trovato.",
+    "invalidInput": "Dati non validi. Controlla hostname, tipo e valore.",
     "generic": "Si è verificato un errore."
+  },
+  "singleCheck": {
+    "title": "Verifica singola",
+    "description": "Prova al volo un singolo record senza creare un batch.",
+    "hostname": "Hostname",
+    "hostnamePlaceholder": "es. example.it",
+    "type": "Tipo",
+    "value": "Valore atteso",
+    "valuePlaceholder": "es. ns1.example.it & ns2.example.it",
+    "submit": "Verifica",
+    "resultTitle": "Risultato"
+  },
+  "rules": {
+    "title": "Come funziona la verifica",
+    "authoritative": "Ogni hostname viene interrogato su TUTTI i name server autoritativi della sua zona.",
+    "contains": "Match \"contiene\": il valore atteso deve essere presente; eventuali record aggiuntivi generano un avviso.",
+    "and": "\"a & b\" → richiede ENTRAMBI i valori (i record extra restano un avviso).",
+    "or": "\"a | b\" → richiede ALMENO UNO dei valori e ammette SOLO i valori elencati (es. accetta \"a & b\" ma non \"a & c\").",
+    "operators": "Gli operatori & e | vanno scritti con spazi attorno; non è possibile mescolarli nella stessa cella.",
+    "cname": "CNAME: il valore è il target canonico (alias). Un nome con CNAME non può avere altri record e può puntare a una catena.",
+    "policy": "Tipi policy (SPF, DKIM, DMARC, MTA-STS, TLS-RPT, BIMI): sono record TXT su nomi convenzionali (es. DMARC → _dmarc.dominio). Per DKIM inserisci il nome completo del selettore nell'hostname (es. sel._domainkey.dominio)."
+  },
+  "matchMode": {
+    "single": "singolo",
+    "all": "tutti (AND)",
+    "any": "uno di (OR)"
   },
   "batch": {
     "progress": "Avanzamento",
@@ -58,6 +85,8 @@
     "name": "Nome",
     "downloadXlsx": "Scarica Excel",
     "downloadCsv": "Scarica CSV",
+    "rerun": "Ripeti",
+    "rerunStarted": "Nuova esecuzione avviata (duplicata nello storico).",
     "groupedByDomain": "Risultati per dominio di secondo livello",
     "invalidRows": "Righe non valide ({{count}})",
     "invalidRowsDesc": "Queste righe sono state ignorate durante la verifica.",
@@ -68,6 +97,7 @@
     "hostname": "Hostname",
     "type": "Tipo",
     "expected": "Valore atteso",
+    "queryName": "Nome interrogato",
     "status": "Esito",
     "nameservers": "Name server autoritativi",
     "details": "Dettaglio per name server",
@@ -110,7 +140,8 @@
     "invalidHostname": "Hostname non valido",
     "emptyType": "Tipo mancante",
     "unsupportedType": "Tipo non supportato",
-    "emptyValue": "Valore mancante"
+    "emptyValue": "Valore mancante",
+    "mixedOperators": "Operatori & e | non possono essere mescolati"
   },
   "counts": {
     "ok": "Corretti",

@@ -53,7 +53,16 @@ export function ResultsTable({ results }: { results: HostResult[] }) {
       title: t('table.hostname'),
       dataIndex: 'hostname',
       key: 'hostname',
-      render: (host: string) => <Typography.Text strong>{host}</Typography.Text>,
+      render: (host: string, row) => (
+        <div>
+          <Typography.Text strong>{host}</Typography.Text>
+          {row.queryName && row.queryName !== host && (
+            <div className="ns-detail-values ns-query-name">
+              {t('table.queryName')}: {row.queryName}
+            </div>
+          )}
+        </div>
+      ),
     },
     {
       title: t('table.type'),
@@ -66,8 +75,13 @@ export function ResultsTable({ results }: { results: HostResult[] }) {
       title: t('table.expected'),
       dataIndex: 'expectedValue',
       key: 'expectedValue',
-      render: (value: string) => (
-        <span className="ns-detail-values">{value}</span>
+      render: (value: string, row) => (
+        <Space direction="vertical" size={2}>
+          <span className="ns-detail-values">{value}</span>
+          {row.matchMode && row.matchMode !== 'single' && (
+            <Tag color="blue">{t(`matchMode.${row.matchMode}`)}</Tag>
+          )}
+        </Space>
       ),
     },
     {

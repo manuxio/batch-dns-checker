@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { useParams } from 'react-router-dom';
+import { useNavigate, useParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import {
   Alert,
@@ -19,6 +19,7 @@ import type { ColumnsType } from 'antd/es/table';
 import {
   FileExcelOutlined,
   FileTextOutlined,
+  RedoOutlined,
   StopOutlined,
 } from '@ant-design/icons';
 import {
@@ -26,6 +27,7 @@ import {
   exportUrl,
   getBatch,
   getBatchGroups,
+  rerunBatch,
   stopBatch,
 } from '../api/client';
 import type { Batch, DomainGroup, InvalidRow } from '../api/types';
@@ -39,6 +41,7 @@ export function BatchPage() {
   const { id = '' } = useParams();
   const { t, i18n } = useTranslation();
   const { message } = AntApp.useApp();
+  const navigate = useNavigate();
 
   const [batch, setBatch] = useState<Batch | null>(null);
   const [groups, setGroups] = useState<DomainGroup[]>([]);
@@ -92,6 +95,17 @@ export function BatchPage() {
       message.error(t(`errors.${code}`, t('errors.generic')));
     } finally {
       setStopping(false);
+    }
+  };
+
+  const handleRerun = async () => {
+    try {
+      const newBatch = await rerunBatch(id);
+      message.success(t('batch.rerunStarted'));
+      navigate(`/batches/${newBatch.id}`);
+    } catch (err) {
+      const code = err instanceof ApiRequestError ? err.code : 'generic';
+      message.error(t(`errors.${code}`, t('errors.generic')));
     }
   };
 
@@ -162,6 +176,13 @@ export function BatchPage() {
               disabled={isRunning}
             >
               {t('batch.downloadCsv')}
+            </Button>
+            <Button
+              icon={<RedoOutlined />}
+              onClick={handleRerun}
+              disabled={isRunning}
+            >
+              {t('batch.rerun')}
             </Button>
           </Space>
         </Space>

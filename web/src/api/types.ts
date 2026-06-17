@@ -8,7 +8,15 @@ export type RecordType =
   | 'TXT'
   | 'NS'
   | 'SRV'
-  | 'CAA';
+  | 'CAA'
+  | 'SPF'
+  | 'DKIM'
+  | 'DMARC'
+  | 'MTASTS'
+  | 'TLSRPT'
+  | 'BIMI';
+
+export type MatchMode = 'single' | 'all' | 'any';
 
 export type NsAnswerStatus = 'ok' | 'mismatch' | 'error' | 'timeout';
 export type HostResultStatus =
@@ -43,9 +51,11 @@ export interface NsAnswer {
 
 export interface HostResult {
   hostname: string;
+  queryName?: string;
   registrableDomain: string;
   type: RecordType;
   expectedValue: string;
+  matchMode?: MatchMode;
   zone: string | null;
   authoritativeNameservers: string[];
   nsAnswers: NsAnswer[];

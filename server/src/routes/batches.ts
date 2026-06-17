@@ -5,6 +5,7 @@ import { deleteBatch, listBatches } from '../db/database';
 import {
   getBatchState,
   groupByDomain,
+  rerunBatch,
   startBatch,
   stopBatch,
 } from '../services/batchRunner';
@@ -106,6 +107,16 @@ batchesRouter.get('/:id/groups', (req, res) => {
     return;
   }
   res.json({ groups: groupByDomain(batch) });
+});
+
+/** POST /api/batches/:id/rerun - clone a batch into a new run (duplicate). */
+batchesRouter.post('/:id/rerun', (req, res) => {
+  const newId = rerunBatch(req.params.id);
+  if (!newId) {
+    res.status(404).json({ error: 'batchNotFound' });
+    return;
+  }
+  res.status(201).json(getBatchState(newId));
 });
 
 /** POST /api/batches/:id/stop - request cancellation. */

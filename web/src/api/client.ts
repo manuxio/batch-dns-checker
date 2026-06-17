@@ -4,6 +4,8 @@ import type {
   BatchProgress,
   BatchSummary,
   DomainGroup,
+  HostResult,
+  RecordType,
 } from './types';
 
 // All requests use the relative /api base: in production nginx proxies it to
@@ -68,6 +70,24 @@ export function createBatch(file: File, name: string): Promise<Batch> {
 
 export function stopBatch(id: string): Promise<void> {
   return request<void>(`/batches/${id}/stop`, { method: 'POST' });
+}
+
+export function rerunBatch(id: string): Promise<Batch> {
+  return request<Batch>(`/batches/${id}/rerun`, { method: 'POST' });
+}
+
+export interface SingleCheckInput {
+  hostname: string;
+  type: RecordType;
+  value: string;
+}
+
+export function checkSingle(input: SingleCheckInput): Promise<HostResult> {
+  return request<HostResult>('/check', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+  });
 }
 
 export function deleteBatch(id: string): Promise<void> {

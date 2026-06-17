@@ -4,6 +4,7 @@ import swaggerUi from 'swagger-ui-express';
 import { config } from './config';
 import { metaRouter } from './routes/meta';
 import { batchesRouter } from './routes/batches';
+import { checksRouter } from './routes/checks';
 import { openapiSpec } from './openapi';
 
 /** Builds and configures the Express application. */
@@ -26,6 +27,7 @@ export function createApp(): express.Express {
   // API routes.
   app.use('/api', metaRouter);
   app.use('/api/batches', batchesRouter);
+  app.use('/api/check', checksRouter);
 
   // 404 for unknown API routes.
   app.use('/api', (_req, res) => {

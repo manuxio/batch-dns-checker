@@ -201,6 +201,29 @@ async function runBatch(
   activeBatches.delete(active.id);
 }
 
+/**
+ * Re-runs an existing batch by cloning its input rows into a brand-new batch
+ * (the original is kept; the new one is duplicated into the history). Returns
+ * the new batch id, or null if the source batch does not exist.
+ */
+export function rerunBatch(id: string): string | null {
+  const source = getBatchState(id);
+  if (!source) return null;
+
+  const validRows: CheckRow[] = source.results.map((result) => ({
+    hostname: result.hostname,
+    type: result.type,
+    expectedValue: result.expectedValue,
+  }));
+
+  return startBatch({
+    name: source.name,
+    fileName: source.fileName,
+    validRows,
+    invalidRows: source.invalidRows,
+  });
+}
+
 /** Requests cooperative cancellation of a running batch. */
 export function stopBatch(id: string): boolean {
   const active = activeBatches.get(id);

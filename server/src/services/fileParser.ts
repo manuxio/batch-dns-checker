@@ -1,7 +1,13 @@
 import Papa from 'papaparse';
 import ExcelJS from 'exceljs';
-import { isSupportedRecordType, type CheckRow, type InvalidRow } from '../types';
+import {
+  isSupportedRecordType,
+  normalizeRecordType,
+  type CheckRow,
+  type InvalidRow,
+} from '../types';
 import { isValidHostname } from '../utils/domain';
+import { hasMixedOperators } from './dnsChecker';
 
 /**
  * Parses an uploaded CSV/XLSX file into validated check rows. The expected
@@ -78,6 +84,7 @@ function rowsToResult(
     if (!typeRaw) errors.push('emptyType');
     else if (!isSupportedRecordType(typeRaw)) errors.push('unsupportedType');
     if (!value) errors.push('emptyValue');
+    else if (hasMixedOperators(value)) errors.push('mixedOperators');
 
     if (errors.length > 0) {
       invalidRows.push({ rowNumber, raw: record, error: errors.join(', ') });
@@ -86,7 +93,7 @@ function rowsToResult(
 
     validRows.push({
       hostname,
-      type: typeRaw.toUpperCase() as CheckRow['type'],
+      type: normalizeRecordType(typeRaw) as CheckRow['type'],
       expectedValue: value,
     });
   });

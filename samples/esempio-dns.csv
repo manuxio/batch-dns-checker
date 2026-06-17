@@ -1,0 +1,10 @@
+hostname,type,value
+one.one.one.one,A,1.1.1.1 & 1.0.0.1
+dns.google,A,8.8.8.8 | 8.8.4.4
+dns.google,A,8.8.8.8 | 1.2.3.4
+dns.google,AAAA,2001:4860:4860::8888
+google.com,SPF,v=spf1 include:_spf.google.com ~all
+example.com,NS,a.iana-servers.net
+www.google.com,A,203.0.113.10
+riga-non-valida,TIPOERRATO,valore
+mix.example.it,A,1.1.1.1 & 2.2.2.2 | 3.3.3.3

@@ -5,7 +5,13 @@ import {
   getRegistrableDomain,
   normalizeHostname,
 } from '../utils/domain';
-import type { CheckRow, HostResult, NsAnswer, RecordType } from '../types';
+import type {
+  CheckRow,
+  HostResult,
+  MatchMode,
+  NsAnswer,
+  RecordType,
+} from '../types';
 
 /**
  * Core DNS verification logic.
@@ -159,9 +165,49 @@ function unquote(value: string): string {
   return value.trim().replace(/^"(.*)"$/s, '$1');
 }
 
+/**
+ * Policy record types are TXT records published at a conventional name with a
+ * recognizable marker. Modelling them as first-class types lets users select
+ * "DMARC" instead of remembering "_dmarc.<domain>" + the marker prefix, and
+ * keeps the comparison focused only on the relevant TXT record.
+ */
+interface PolicyType {
+  /** Label prefix prepended to the hostname (empty = query the host as-is). */
+  prefix: string;
+  /** Lower-cased marker identifying the relevant TXT record. */
+  marker: string;
+}
+
+const POLICY_TYPES: Partial<Record<RecordType, PolicyType>> = {
+  SPF: { prefix: '', marker: 'v=spf1' },
+  DKIM: { prefix: '', marker: 'v=dkim1' }, // full selector name goes in hostname
+  DMARC: { prefix: '_dmarc', marker: 'v=dmarc1' },
+  MTASTS: { prefix: '_mta-sts', marker: 'v=stsv1' },
+  TLSRPT: { prefix: '_smtp._tls', marker: 'v=tlsrptv1' },
+  BIMI: { prefix: 'default._bimi', marker: 'v=bimi1' },
+};
+
+export function isPolicyType(type: RecordType): boolean {
+  return type in POLICY_TYPES;
+}
+
+/** Resolves the actual FQDN to query for a (possibly policy) record type. */
+export function resolveQueryName(type: RecordType, hostname: string): string {
+  const policy = POLICY_TYPES[type];
+  if (policy && policy.prefix) {
+    // Don't double-prefix if the user already supplied the full name.
+    if (hostname === policy.prefix || hostname.startsWith(`${policy.prefix}.`)) {
+      return hostname;
+    }
+    return `${policy.prefix}.${hostname}`;
+  }
+  return hostname;
+}
+
 /** Normalizes the user-provided expected value for a given record type. */
 export function normalizeExpected(type: RecordType, rawValue: string): string {
   const value = rawValue.trim();
+  if (isPolicyType(type)) return unquote(value); // policy records are TXT
   switch (type) {
     case 'A':
     case 'AAAA':
@@ -208,6 +254,15 @@ async function queryRecord(
   hostname: string,
   type: RecordType,
 ): Promise<string[]> {
+  const policy = POLICY_TYPES[type];
+  if (policy) {
+    // Policy records are TXT; keep only the TXT matching the policy marker so
+    // unrelated TXT records at the same name aren't treated as extras.
+    const txts = (await resolver.resolveTxt(hostname)).map((chunks) =>
+      unquote(chunks.join('')),
+    );
+    return txts.filter((t) => t.trim().toLowerCase().startsWith(policy.marker));
+  }
   switch (type) {
     case 'A':
       return (await resolver.resolve4(hostname)).map((v) => v.toLowerCase());
@@ -249,6 +304,100 @@ function mxMatchesWithoutPriority(expected: string, returned: string[]): boolean
   return returned.some((r) => r.split(/\s+/).slice(1).join(' ') === expected);
 }
 
+/** A (possibly compound) expectation parsed from the expected value cell. */
+export interface Expectation {
+  mode: MatchMode;
+  /** Normalized expected values (per record type). */
+  values: string[];
+  /** Original raw expression, kept for display/export. */
+  raw: string;
+}
+
+/** Detects a value that mixes both operators (ambiguous, treated as invalid). */
+export function hasMixedOperators(rawValue: string): boolean {
+  return /\s&\s/.test(rawValue) && /\s\|\s/.test(rawValue);
+}
+
+/**
+ * Parses a (possibly compound) expected value into an Expectation:
+ *  - "a & b" -> mode 'all'  (every listed value must be present)
+ *  - "a | b" -> mode 'any'  (at least one present AND no value outside the set)
+ *  - "a"     -> mode 'single'
+ * Operators are recognized only when surrounded by whitespace, so a literal
+ * "a&b" (e.g. inside a TXT record) stays a single value.
+ */
+export function parseExpectation(
+  type: RecordType,
+  rawValue: string,
+): Expectation {
+  const raw = rawValue.trim();
+  const hasAnd = /\s&\s/.test(raw);
+  const hasOr = /\s\|\s/.test(raw);
+
+  let mode: MatchMode = 'single';
+  let parts = [raw];
+  if (hasAnd && !hasOr) {
+    mode = 'all';
+    parts = raw.split(/\s+&\s+/);
+  } else if (hasOr && !hasAnd) {
+    mode = 'any';
+    parts = raw.split(/\s+\|\s+/);
+  }
+
+  const values = parts
+    .map((part) => normalizeExpected(type, part))
+    .filter((value) => value.length > 0);
+
+  return { mode, values, raw };
+}
+
+/** True when an expected value is satisfied by the returned set. */
+function valueSatisfied(expectedValue: string, returned: string[]): boolean {
+  return (
+    returned.includes(expectedValue) ||
+    mxMatchesWithoutPriority(expectedValue, returned)
+  );
+}
+
+/** True when a returned value is one of the allowed expected values. */
+function isReturnedAllowed(returnedValue: string, allowed: string[]): boolean {
+  if (allowed.includes(returnedValue)) return true;
+  // MX: an expected host-only value allows a returned "<priority> host".
+  return allowed.some(
+    (a) =>
+      !a.includes(' ') && returnedValue.split(/\s+/).slice(1).join(' ') === a,
+  );
+}
+
+interface MatchOutcome {
+  matched: boolean;
+  /** Returned values outside the expectation (warnings for single/all). */
+  extraValues: string[];
+}
+
+/** Evaluates the values returned by one nameserver against the expectation. */
+function evaluateMatch(exp: Expectation, returned: string[]): MatchOutcome {
+  const extras = returned.filter((v) => !isReturnedAllowed(v, exp.values));
+
+  switch (exp.mode) {
+    case 'all': {
+      // Every listed value must be present; extra records are warnings.
+      const matched = exp.values.every((v) => valueSatisfied(v, returned));
+      return { matched, extraValues: matched ? extras : [] };
+    }
+    case 'any': {
+      // At least one listed value present AND no value outside the listed set.
+      const present = exp.values.some((v) => valueSatisfied(v, returned));
+      const matched = present && extras.length === 0;
+      return { matched, extraValues: [] };
+    }
+    default: {
+      const matched = valueSatisfied(exp.values[0], returned);
+      return { matched, extraValues: matched ? extras : [] };
+    }
+  }
+}
+
 interface SingleNsResult {
   status: NsAnswer['status'];
   returnedValues: string[];
@@ -260,21 +409,18 @@ async function checkAgainstNs(
   ip: string,
   hostname: string,
   type: RecordType,
-  expected: string,
+  expectation: Expectation,
 ): Promise<SingleNsResult> {
   const resolver = createPinnedResolver(ip);
   try {
     const returnedValues = await withRetry(() =>
       queryRecord(resolver, hostname, type),
     );
-    const contains =
-      returnedValues.includes(expected) ||
-      mxMatchesWithoutPriority(expected, returnedValues);
-    const extraValues = returnedValues.filter((v) => v !== expected);
+    const { matched, extraValues } = evaluateMatch(expectation, returnedValues);
     return {
-      status: contains ? 'ok' : 'mismatch',
+      status: matched ? 'ok' : 'mismatch',
       returnedValues,
-      extraValues: contains ? extraValues : [],
+      extraValues,
     };
   } catch (err) {
     const error = err as NodeJS.ErrnoException;
@@ -298,16 +444,20 @@ export async function checkHost(
   row: CheckRow,
   cache: DnsCache,
 ): Promise<HostResult> {
-  const hostname = normalizeHostname(row.hostname);
-  const registrableDomain = getRegistrableDomain(hostname);
-  const expected = normalizeExpected(row.type, row.expectedValue);
+  const inputHostname = normalizeHostname(row.hostname);
+  const registrableDomain = getRegistrableDomain(inputHostname);
+  const expectation = parseExpectation(row.type, row.expectedValue);
+  // Policy types (DMARC, MTA-STS, ...) are queried at a conventional sub-name.
+  const queryName = resolveQueryName(row.type, inputHostname);
   const defaultResolver = createDefaultResolver();
 
   const base: HostResult = {
-    hostname,
+    hostname: inputHostname,
+    queryName,
     registrableDomain,
     type: row.type,
     expectedValue: row.expectedValue.trim(),
+    matchMode: expectation.mode,
     zone: null,
     authoritativeNameservers: [],
     nsAnswers: [],
@@ -316,7 +466,7 @@ export async function checkHost(
   };
 
   const { zone, nameservers } = await findAuthoritativeNameservers(
-    hostname,
+    queryName,
     defaultResolver,
     cache,
   );
@@ -344,7 +494,7 @@ export async function checkHost(
       continue;
     }
     // Query the first reachable IP for this nameserver.
-    const result = await checkAgainstNs(ips[0], hostname, row.type, expected);
+    const result = await checkAgainstNs(ips[0], queryName, row.type, expectation);
     nsAnswers.push({
       nsName,
       nsIp: ips[0],
