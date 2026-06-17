@@ -31,8 +31,8 @@ export function App() {
     <ConfigProvider
       locale={isEnglish ? enUS : itIT}
       theme={{
-        algorithm: theme.defaultAlgorithm,
-        token: { colorPrimary: '#0b5fae' },
+        algorithm: theme.darkAlgorithm,
+        token: { colorPrimary: '#3b9dff' },
       }}
     >
       <AntApp>

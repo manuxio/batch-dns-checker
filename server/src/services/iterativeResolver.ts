@@ -46,10 +46,20 @@ export interface AuthLookup {
 export interface ResolveCache {
   zoneServers: Map<string, AuthServer[]>; // zone -> delegated nameservers
   nsIps: Map<string, string[]>; // ns name -> IP addresses
+  /** Set once root servers are found unreachable, to use the fallback path. */
+  useFallback: boolean;
 }
 
 export function createResolveCache(): ResolveCache {
-  return { zoneServers: new Map(), nsIps: new Map() };
+  return { zoneServers: new Map(), nsIps: new Map(), useFallback: false };
+}
+
+/** Thrown when no root server can be reached (e.g. outbound :53 is blocked). */
+export class RootUnreachableError extends Error {
+  constructor() {
+    super('root servers unreachable');
+    this.name = 'RootUnreachableError';
+  }
 }
 
 /** Orders IPs with IPv4 first (IPv6 is often unreachable in containers). */
@@ -143,7 +153,12 @@ export async function findAuthoritativeServers(
 
   for (let step = 0; step < 32; step += 1) {
     const response = await queryAcross(servers, target, 'NS');
-    if (!response) break;
+    if (!response) {
+      // Could not reach any root server on the very first hop: outbound DNS to
+      // arbitrary servers is likely blocked. Signal the caller to fall back.
+      if (step === 0 && start.zone === '') throw new RootUnreachableError();
+      break;
+    }
 
     const nsRecords = nsRecordsFrom(response);
     if (nsRecords.length === 0) {

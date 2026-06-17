@@ -17,6 +17,16 @@ export const config = {
   dnsMaxRetries: Number(process.env.DNS_MAX_RETRIES ?? 10),
   /** Backoff (ms) between retries; the last value repeats for further retries. */
   dnsBackoffMs: parseBackoff(process.env.DNS_BACKOFF_MS, [100, 500, 1000, 2000]),
+  /**
+   * Force using the local/recursive resolver instead of iterating from root.
+   * Useful where outbound DNS is only allowed to a fixed resolver.
+   */
+  dnsForceLocalResolver: parseBool(process.env.DNS_FORCE_LOCAL_RESOLVER, false),
+  /**
+   * Resolver IPs used for the fallback (and forced-local) path. Empty = use the
+   * system/container default resolver.
+   */
+  dnsFallbackServers: parseList(process.env.DNS_FALLBACK_SERVERS),
   /** Soft cap on records per batch: exceeding it warns but does not block. */
   softMaxRecords: Number(process.env.SOFT_MAX_RECORDS ?? 150),
   /** Maximum accepted upload size in bytes. */
@@ -32,6 +42,18 @@ function parseBackoff(value: string | undefined, fallback: number[]): number[] {
     .map((v) => Number(v.trim()))
     .filter((v) => Number.isFinite(v) && v >= 0);
   return parsed.length > 0 ? parsed : fallback;
+}
+
+function parseBool(value: string | undefined, fallback: boolean): boolean {
+  if (value === undefined) return fallback;
+  return ['1', 'true', 'yes', 'on'].includes(value.trim().toLowerCase());
+}
+
+function parseList(value: string | undefined): string[] {
+  return (value ?? '')
+    .split(',')
+    .map((v) => v.trim())
+    .filter(Boolean);
 }
 
 export type AppConfig = typeof config;

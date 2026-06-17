@@ -5,6 +5,12 @@ body,
   margin: 0;
 }
 
+/* Dark page background behind the antd dark theme. */
+body {
+  background: #141414;
+  color: rgba(255, 255, 255, 0.85);
+}
+
 .app-header {
   display: flex;
   align-items: center;

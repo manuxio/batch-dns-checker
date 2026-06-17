@@ -130,7 +130,8 @@
     "someNameserversUnreachable": "Alcuni name server non raggiungibili",
     "extraRecordsPresent": "Presenti record aggiuntivi oltre al valore atteso",
     "inconsistentAcrossNameservers": "Risposte incoerenti tra i name server",
-    "noApexNsRecords": "La zona non pubblica record NS all'apex: verifica eseguita sul master primario (SOA)"
+    "noApexNsRecords": "La zona non pubblica record NS all'apex: verifica eseguita sul master primario (SOA)",
+    "resolvedViaLocalResolver": "Root non raggiungibili: verifica eseguita tramite resolver locale (dato potenzialmente non aggiornato, non autoritativo)"
   },
   "message": {
     "noAuthoritativeNameservers": "Nessun name server autoritativo trovato",

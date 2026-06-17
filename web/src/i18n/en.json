@@ -130,7 +130,8 @@
     "someNameserversUnreachable": "Some nameservers unreachable",
     "extraRecordsPresent": "Extra records present beyond the expected value",
     "inconsistentAcrossNameservers": "Inconsistent answers across nameservers",
-    "noApexNsRecords": "Zone publishes no apex NS records: verified against the SOA primary master"
+    "noApexNsRecords": "Zone publishes no apex NS records: verified against the SOA primary master",
+    "resolvedViaLocalResolver": "Root servers unreachable: verified via the local resolver (data may be stale, not authoritative)"
   },
   "message": {
     "noAuthoritativeNameservers": "No authoritative nameservers found",

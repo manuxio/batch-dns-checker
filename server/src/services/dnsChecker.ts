@@ -1,11 +1,14 @@
+import { config } from '../config';
 import { getRegistrableDomain, normalizeHostname } from '../utils/domain';
 import { withRetry } from '../utils/retry';
 import { dnsQuery, type DnsRecord } from './dnsClient';
 import {
   createResolveCache,
   findAuthoritativeServers,
+  RootUnreachableError,
   type ResolveCache,
 } from './iterativeResolver';
+import { fetchViaLocalResolver } from './recursiveFallback';
 import type {
   CheckRow,
   HostResult,
@@ -389,7 +392,22 @@ export async function checkHost(
     warnings: [],
   };
 
-  const auth = await findAuthoritativeServers(queryName, cache);
+  // Degraded mode: use the local resolver if forced, or after the root servers
+  // were found unreachable earlier in this batch.
+  if (config.dnsForceLocalResolver || cache.useFallback) {
+    return checkViaLocalResolver(base, row.type, expectation);
+  }
+
+  let auth;
+  try {
+    auth = await findAuthoritativeServers(queryName, cache);
+  } catch (err) {
+    if (err instanceof RootUnreachableError) {
+      cache.useFallback = true; // stop hammering the roots for the rest of batch
+      return checkViaLocalResolver(base, row.type, expectation);
+    }
+    throw err;
+  }
   base.zone = auth.zone;
   base.authoritativeNameservers = auth.servers.map((s) => s.name);
 
@@ -430,6 +448,63 @@ export async function checkHost(
   );
 
   return aggregate(base);
+}
+
+/**
+ * Degraded verification via the local/recursive resolver. Used only when the
+ * root servers are unreachable. The answer may be cached (not fresh) and cannot
+ * be confirmed per authoritative nameserver, so it is always flagged.
+ */
+async function checkViaLocalResolver(
+  base: HostResult,
+  type: RecordType,
+  expectation: Expectation,
+): Promise<HostResult> {
+  const queryName = base.queryName ?? base.hostname;
+  const policy = POLICY_TYPES[type];
+
+  // Best-effort NS names for display only.
+  try {
+    base.authoritativeNameservers = await fetchViaLocalResolver(
+      base.registrableDomain,
+      'NS',
+    );
+  } catch {
+    base.authoritativeNameservers = [];
+  }
+
+  let returnedValues: string[] = [];
+  let reachable = true;
+  try {
+    returnedValues = await fetchViaLocalResolver(
+      queryName,
+      wireType(type),
+      policy?.marker,
+    );
+  } catch {
+    reachable = false;
+  }
+
+  const { matched, extraValues } = evaluateMatch(expectation, returnedValues);
+  base.nsAnswers = [
+    {
+      nsName: 'local-resolver',
+      nsIp: config.dnsFallbackServers[0] ?? null,
+      status: reachable ? (matched ? 'ok' : 'mismatch') : 'error',
+      returnedValues,
+      extraValues,
+      error: reachable ? undefined : 'localResolverFailed',
+    },
+  ];
+
+  base.warnings = ['resolvedViaLocalResolver'];
+  if (extraValues.length > 0) base.warnings.push('extraRecordsPresent');
+  if (!reachable) {
+    base.status = 'error';
+  } else {
+    base.status = matched ? (extraValues.length > 0 ? 'warning' : 'ok') : 'error';
+  }
+  return base;
 }
 
 /** Combines per-NS answers into the overall host status + warnings. */

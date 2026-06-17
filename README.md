@@ -1,264 +1,388 @@
 # CONI SVC DNS Checker
 
-Verifica che una lista di hostname sia risolta da **tutti** i rispettivi name
-server autoritativi con il **tipo** e il **valore** attesi. Carichi un file
-CSV/Excel, l'applicazione esegue le verifiche in batch (interrompibili) e mostra
-un riepilogo raggruppato per **dominio di secondo livello**, scaricabile in
-Excel/CSV (incluso l'elenco dei name server autoritativi interrogati).
+A dockerized web app + REST API to **verify that third‑party domain owners have
+applied the DNS changes you requested** — i.e. that a list of hostnames resolves,
+on **all** of their authoritative nameservers, to the **type** and **value** you
+expect.
 
-> The UI is in Italian by default and fully internationalized (it / en). The
-> codebase, comments and identifiers are in English (camelCase).
+You upload a CSV/Excel file (`hostname, type, value`), the app runs the checks as
+an interruptible batch, shows a recap **grouped by secondary‑level domain**, and
+lets you download the result (including the list of authoritative nameservers
+queried). The last 10 batches are kept for later consultation.
 
----
-
-## Architettura
-
-```
-┌────────────┐      http (porta WEB_PORT, default 8080)      ┌──────────────────┐
-│  Browser   │ ───────────────────────────────────────────► │  web (nginx)     │
-└────────────┘                                               │  - serve la SPA  │
-                                                             │  - proxy /api →  │
-                                                             └─────────┬────────┘
-                                                                       │ docker network
-                                                                       ▼
-                                                             ┌──────────────────┐
-                                                             │  server (Express)│
-                                                             │  - API REST      │
-                                                             │  - motore DNS    │
-                                                             │  - SQLite (/data)│
-                                                             └──────────────────┘
-```
-
-- **server** — Node.js + Express + TypeScript. Motore di verifica DNS, parsing
-  file, export, persistenza su **SQLite** (volume `dns_data`). API documentate
-  con **OpenAPI/Swagger**.
-- **web** — React + TypeScript (Vite) con **Ant Design**. Servita da **nginx**,
-  che fa anche da reverse proxy verso il backend (nessun problema di CORS in
-  produzione, singola origin).
-
-### Routing HTTP
-Il browser parla solo con nginx sulla porta pubblicata. nginx serve i file
-statici della SPA e inoltra `/api/*` (incluse `/api/docs` e `/api/openapi.json`)
-al container `server:3001` sulla rete Docker. Solo il container `web` pubblica
-una porta sull'host: il backend è raggiungibile esclusivamente dalla rete
-interna e non può entrare in conflitto con altre porte della macchina.
+> The UI defaults to **Italian** and is fully internationalized (`it` / `en`).
+> The codebase, comments and identifiers are in English (camelCase). The UI uses
+> a **dark theme**.
 
 ---
 
-## Avvio con Docker (consigliato)
+## Table of contents
+
+- [Why it works the way it does (DNS rationale)](#why-it-works-the-way-it-does-dns-rationale)
+- [Features](#features)
+- [Architecture](#architecture)
+- [Quick start (Docker)](#quick-start-docker)
+- [Local development](#local-development)
+- [Input file format](#input-file-format)
+- [Record types](#record-types)
+- [Compound values (`&` / `|`)](#compound-values---)
+- [How a result is decided](#how-a-result-is-decided)
+- [Batches & single check](#batches--single-check)
+- [API](#api)
+- [Configuration](#configuration)
+- [Network requirements](#network-requirements)
+- [Dependency security notes](#dependency-security-notes)
+- [Project structure](#project-structure)
+
+---
+
+## Why it works the way it does (DNS rationale)
+
+This tool checks **compliance**: did a third party actually point a hostname to
+the value we asked for? For that, the answer must be the **freshest and most
+authoritative** possible. Two consequences drive the whole design:
+
+### 1. Resolution starts from the root — every time
+
+Instead of asking a recursive resolver (which **caches** answers and can return
+stale data for minutes/hours), the engine performs **iterative resolution from
+the root servers**, exactly like `dig +trace`:
+
+```
+root servers ──referral──▶ TLD servers (.net, .it, …) ──referral──▶ the domain's
+authoritative nameservers
+```
+
+The domain's authoritative nameservers are taken from the **parent zone's
+delegation**. This has two important properties:
+
+- **Freshness:** no recursive resolver and no answer cache sit between the tool
+  and the source of truth.
+- **Robustness:** because the nameservers come from the parent delegation, the
+  tool works even if a zone is misconfigured and does **not** publish `NS`
+  records at its apex (a real case we hit: a domain with a working delegation but
+  an empty apex — the old recursive approach wrongly reported "no authoritative
+  nameservers").
+
+### 2. Every authoritative nameserver is queried directly, with recursion off
+
+Once the authoritative nameservers are known, the tool queries **each of them
+directly** with **recursion disabled (`RD=0`)** and compares the answer. A host
+is only "OK" if **all** authoritative nameservers agree; any inconsistency
+between them is flagged. The per‑nameserver detail is recorded and included in
+the downloadable result.
+
+Only the *discovery* of which servers are authoritative is cached within a single
+batch run (for speed). **Record values are never cached** — they are always read
+live from the authoritative servers.
+
+### 3. Fallback when the root path is blocked
+
+Iterative resolution needs outbound DNS to arbitrary servers (see
+[Network requirements](#network-requirements)). If the root servers cannot be
+reached (e.g. a firewall only allows DNS to a fixed corporate resolver), the
+engine automatically **falls back to the local/recursive resolver** and clearly
+flags every such result with a warning ("resolved via local resolver — data may
+be stale, not authoritative").
+
+> ⚠️ Note: in a network locked down enough to block the root path, the local
+> resolver may also be unable to resolve uncached names, so many checks can still
+> fail. The fallback is a best‑effort degraded mode, not a full substitute. You
+> can force this mode (or point it at a specific resolver) via
+> `DNS_FORCE_LOCAL_RESOLVER` / `DNS_FALLBACK_SERVERS`.
+
+---
+
+## Features
+
+- ✅ Upload **CSV or Excel** (`.csv`, `.xlsx`, `.xls`); CSV delimiter
+  auto‑detected (comma or semicolon — Italian Excel exports).
+- ✅ Verification against **all authoritative nameservers**, resolved **from
+  root**, queried directly (fresh, `RD=0`).
+- ✅ Standard record types **A, AAAA, CNAME, MX, TXT, NS, SRV, CAA** plus email
+  **policy types SPF, DKIM, DMARC, MTA‑STS, TLS‑RPT, BIMI**.
+- ✅ **Compound expected values**: `a & b` (both required) and `a | b` (one of,
+  closed set).
+- ✅ Results **grouped by secondary‑level domain**, with per‑nameserver detail.
+- ✅ **Asynchronous, interruptible batches** with live progress; **re‑run** any
+  batch (duplicated into history); last **10** batches kept (SQLite).
+- ✅ **Single‑record** quick check on the home page.
+- ✅ **Downloadable results** (XLSX/CSV) including the authoritative NS queried;
+  downloadable **input template**.
+- ✅ **Italian/English** UI (dark theme); documented **REST API** with
+  **OpenAPI/Swagger** at `/api/docs`.
+- ✅ No authentication required.
+
+---
+
+## Architecture
+
+```text
+┌────────────┐   http (host port WEB_PORT, default 8080)   ┌──────────────────────┐
+│  Browser   │ ──────────────────────────────────────────▶│  web (nginx)         │
+└────────────┘                                             │  • serves the SPA    │
+                                                           │  • proxies /api ───┐ │
+                                                           └────────────────────┼─┘
+                                                                                │ docker net
+                                                                                ▼
+                                                           ┌──────────────────────┐
+                                                           │  server (Express/TS) │
+                                                           │  • REST API + OpenAPI│
+                                                           │  • iterative DNS     │
+                                                           │    engine (from root)│
+                                                           │  • SQLite (/data)    │
+                                                           └──────────┬───────────┘
+                                                                      │ UDP/TCP :53
+                                                                      ▼
+                                              root → TLD → authoritative nameservers
+```
+
+- **server** — Node.js + Express + TypeScript. DNS engine (iterative from root,
+  built on `dns-packet`), file parsing (`exceljs`/`papaparse`), result export,
+  SQLite persistence (volume `dns_data`), OpenAPI/Swagger.
+- **web** — React + TypeScript (Vite) with **Ant Design** (dark theme), served by
+  **nginx**, which also reverse‑proxies `/api` to the backend (single origin → no
+  CORS in production).
+
+---
+
+## Quick start (Docker)
+
+Requirements: Docker + Docker Compose, and outbound DNS egress (see
+[Network requirements](#network-requirements)).
 
 ```bash
-# (opzionale) se la porta 8080 è occupata, scegline un'altra:
-cp .env.example .env   # poi imposta WEB_PORT=9090, ad es.
+git clone git@github.com:manuxio/batch-dns-checker.git
+cd batch-dns-checker
+
+# Optional: if port 8080 is busy, pick another one.
+cp .env.example .env      # then set WEB_PORT=9090, etc.
 
 docker compose up --build
 ```
 
-Poi apri:
+Then open:
 
-- App: `http://localhost:8080` (o la `WEB_PORT` scelta)
-- Documentazione API (Swagger UI): `http://localhost:8080/api/docs`
-- Spec OpenAPI: `http://localhost:8080/api/openapi.json`
+- App: `http://localhost:8080` (or your `WEB_PORT`)
+- API docs (Swagger UI): `http://localhost:8080/api/docs`
+- OpenAPI spec: `http://localhost:8080/api/openapi.json`
 
-I dati (storico batch in SQLite) sono persistiti nel volume Docker `dns_data`.
-
----
-
-## Sviluppo locale (senza Docker)
-
-Due terminali:
+Batch history (SQLite) is persisted in the Docker volume `dns_data`.
 
 ```bash
-# Terminale 1 — backend (http://localhost:3001)
-cd server
-npm install
-npm run dev
-
-# Terminale 2 — frontend (http://localhost:5173)
-cd web
-npm install
-npm run dev
+docker compose logs -f     # tail logs
+docker compose down        # stop (keep history)
+docker compose down -v     # stop and wipe stored batches
 ```
 
-Il dev server di Vite fa da proxy di `/api` verso `localhost:3001`, quindi la
-stessa base relativa `/api` funziona sia in sviluppo sia in produzione.
+A ready‑to‑upload sample is provided at [`samples/esempio-dns.csv`](samples/esempio-dns.csv).
 
 ---
 
-## Formato del file di input
+## Local development
 
-Header obbligatorio con le colonne **hostname**, **type**, **value** (qualsiasi
-ordine; i nomi sono riconosciuti anche in italiano e con alias comuni). Per i
-CSV il delimitatore (virgola o punto e virgola) è rilevato automaticamente; sono
-supportati anche `.xlsx` / `.xls`.
+Two terminals, no Docker:
 
-| hostname             | type | value                          |
-|----------------------|------|--------------------------------|
-| www.example.it       | A    | 93.184.216.34                  |
-| example.it           | MX   | 10 mail.example.it             |
-| example.it           | TXT  | v=spf1 include:_spf.example.it -all |
-| \_sip.\_tcp.example.it | SRV  | 10 60 5060 sip.example.it       |
+```bash
+# Terminal 1 — backend (http://localhost:3001)
+cd server && npm install && npm run dev
 
-Una riga = una verifica. Per attendersi più valori sullo stesso hostname, usa
-più righe (oppure gli operatori `&` / `|`, vedi sotto). Scarica un modello pronto
-dalla home (`Modello Excel` / `Modello CSV`) o da `GET /api/template?format=xlsx|csv`.
-
-**Tipi standard:** `A, AAAA, CNAME, MX, TXT, NS, SRV, CAA`.
-
-**Tipi "policy"** (record TXT su nomi convenzionali): `SPF, DKIM, DMARC, MTA-STS,
-TLS-RPT, BIMI`. Per questi l'app interroga automaticamente il nome giusto e
-considera solo il record TXT pertinente (in base al marker, es. `v=DMARC1`):
-
-| Tipo     | Nome interrogato                  | Marker        |
-|----------|-----------------------------------|---------------|
-| SPF      | `<host>`                          | `v=spf1`      |
-| DMARC    | `_dmarc.<host>`                   | `v=DMARC1`    |
-| MTA-STS  | `_mta-sts.<host>`                 | `v=STSv1`     |
-| TLS-RPT  | `_smtp._tls.<host>`               | `v=TLSRPTv1`  |
-| BIMI     | `default._bimi.<host>`            | `v=BIMI1`     |
-| DKIM     | usa il nome completo del selettore in `hostname` | `v=DKIM1` |
-
-### Valori composti (`&` / `|`)
-
-Il valore atteso può combinare più valori (operatori delimitati da spazi):
-
-- **`a & b`** → richiede **entrambi** i valori (eventuali record extra restano un
-  avviso, come per il valore singolo).
-- **`a | b`** → richiede **almeno uno** dei valori **e ammette solo** i valori
-  elencati. Esempio: con `a | b`, una risposta `a & b` è accettata, mentre
-  `a & c` è considerata errata (`c` non è tra i valori ammessi).
-
-Gli operatori non possono essere mescolati nella stessa cella (riga non valida).
-
-### CNAME
-
-Per i CNAME il valore è il **target canonico** (alias). Un nome con un CNAME non
-può avere altri record e può puntare a una catena di alias. Esempio:
-`shop.example.it , CNAME , www.example.it`.
-
-### Verifica singola
-
-Dalla home è disponibile un riquadro **"Verifica singola"** per testare al volo
-un singolo record (`hostname`, `tipo`, `valore atteso`) senza creare un batch —
-corrisponde all'endpoint `POST /api/check`.
-
----
-
-## Logica di verifica
-
-Per ogni riga la risoluzione parte **sempre dai root server** e segue la catena
-di delega, in modo da ottenere il dato **più fresco possibile** (essenziale per
-verificare la compliance di terze parti):
-
-1. risoluzione **iterativa dai root** (root → TLD → dominio) per individuare i
-   name server autoritativi del dominio. Gli NS provengono dalla **delega del
-   genitore**, quindi la scoperta funziona anche se la zona non pubblica i record
-   NS all'apex;
-2. si interroga **ogni** name server autoritativo **direttamente, con ricorsione
-   disabilitata (RD=0)**: nessun resolver ricorsivo, nessuna cache intermedia;
-3. il valore atteso è confrontato in modalità **"contains"** (corretto se il
-   valore atteso è presente; eventuali record extra generano un **avviso**);
-4. gli esiti dei singoli NS vengono aggregati:
-   - **ok** — tutti gli NS rispondono col valore atteso, senza extra;
-   - **warning** — tutti corretti ma con record aggiuntivi;
-   - **error** — almeno un NS non corrisponde / irraggiungibile, oppure risposte
-     incoerenti tra NS.
-
-I confronti sono normalizzati (case-insensitive, punto finale tollerato, TXT/MX
-gestiti per segmenti). Gli errori di risoluzione **transitori** (timeout,
-SERVFAIL, REFUSED, ...) vengono ritentati fino a **10 volte** con backoff
-`100ms → 500ms → 1s → 2s → 2s…`; un NXDOMAIN/NODATA definitivo non viene
-ritentato (è un mismatch).
-
----
-
-## Batch
-
-- Esecuzione **asincrona** con avanzamento in tempo reale (polling).
-- **Interrompibile** dalla UI (gli elementi rimanenti diventano *annullati*).
-- Vengono conservati gli **ultimi 10 batch** per consultazione (SQLite).
-- **Soft limit** di 150 record per batch: file più grandi sono accettati ma
-  segnalati con un avviso.
-- I batch rimasti "in corso" dopo un riavvio del server vengono marcati come
-  *interrotti*.
-
----
-
-## API principali
-
-Base path: `/api` — documentazione interattiva su `/api/docs`.
-
-| Metodo | Endpoint                         | Descrizione                              |
-|--------|----------------------------------|------------------------------------------|
-| GET    | `/health`                        | Stato del servizio                       |
-| GET    | `/config`                        | Configurazione per il client             |
-| GET    | `/record-types`                  | Tipi di record supportati                |
-| GET    | `/template?format=xlsx\|csv`     | Modello di input di esempio              |
-| POST   | `/check`                         | Verifica singola sincrona (no batch)     |
-| GET    | `/batches`                       | Ultimi 10 batch                          |
-| POST   | `/batches`                       | Upload file + avvio batch (multipart)    |
-| GET    | `/batches/:id`                   | Batch completo con risultati             |
-| GET    | `/batches/:id/status`            | Avanzamento (per polling)                |
-| GET    | `/batches/:id/groups`            | Risultati per dominio di secondo livello |
-| POST   | `/batches/:id/stop`              | Richiede l'interruzione                  |
-| POST   | `/batches/:id/rerun`             | Ripete il batch (duplicato nello storico)|
-| DELETE | `/batches/:id`                   | Elimina un batch                         |
-| GET    | `/batches/:id/export?format=...` | Scarica i risultati (incl. NS interrogati)|
-
----
-
-## Configurazione (variabili d'ambiente)
-
-| Variabile              | Default                | Descrizione                                  |
-|------------------------|------------------------|----------------------------------------------|
-| `WEB_PORT`             | `8080`                 | Porta host della UI                          |
-| `PORT`                 | `3001`                 | Porta interna del backend                    |
-| `DATA_DIR`             | `/data`                | Cartella del database SQLite                 |
-| `DNS_TIMEOUT_MS`       | `5000`                 | Timeout per query DNS                        |
-| `DNS_TRIES`            | `2`                    | Tentativi del resolver per query             |
-| `DNS_HOST_CONCURRENCY` | `8`                    | Hostname verificati in parallelo             |
-| `DNS_MAX_RETRIES`      | `10`                   | Retry su errori transitori                   |
-| `DNS_BACKOFF_MS`       | `100,500,1000,2000`    | Backoff tra i retry (l'ultimo si ripete)     |
-| `SOFT_MAX_RECORDS`     | `150`                  | Soft limit record per batch                  |
-| `MAX_UPLOAD_BYTES`     | `10485760`             | Dimensione massima upload                    |
-| `MAX_BATCHES`          | `10`                   | Batch conservati nello storico               |
-
----
-
-## Note sulla sicurezza delle dipendenze
-
-`npm audit` segnala alcune vulnerabilità **transitive** che non sono sfruttabili
-in questo progetto:
-
-- **server** — `exceljs` → `uuid <11.1.1` (moderate): riguarda solo la
-  generazione di UUID v3/v5/v6 con il parametro `buf`. exceljs usa UUID v4 senza
-  quel parametro, quindi il percorso vulnerabile non è raggiungibile. (La libreria
-  `xlsx`/SheetJS è stata sostituita proprio per eliminare una ReDoS *high* che
-  era invece nel percorso di parsing dei file.)
-- **web** — `vite` → `esbuild` (moderate/high): riguarda **solo il dev server**
-  di Vite. In produzione la SPA è servita da nginx come file statici: Vite ed
-  esbuild non sono presenti nell'immagine runtime, quindi non c'è esposizione.
-
-## Struttura del progetto
-
+# Terminal 2 — frontend (http://localhost:5173)
+cd web && npm install && npm run dev
 ```
-dns-checker/
+
+Vite proxies `/api` to `localhost:3001`, so the same relative `/api` base works
+in dev and in production.
+
+---
+
+## Input file format
+
+A header row with the columns **hostname**, **type**, **value** (any order;
+common Italian aliases and case‑insensitive headers are accepted). One row = one
+check.
+
+| hostname               | type | value                               |
+|------------------------|------|-------------------------------------|
+| www.example.it         | A    | 93.184.216.34                       |
+| example.it             | MX   | 10 mail.example.it                  |
+| example.it             | DMARC| v=DMARC1; p=reject; rua=mailto:d@example.it |
+| \_sip.\_tcp.example.it | SRV  | 10 60 5060 sip.example.it           |
+
+Download a filled template from the home page (**Modello Excel / Modello CSV**)
+or from `GET /api/template?format=xlsx|csv`.
+
+---
+
+## Record types
+
+**Standard:** `A, AAAA, CNAME, MX, TXT, NS, SRV, CAA`.
+
+**Policy types** (TXT records at conventional names; the app queries the right
+name automatically and only compares the relevant record, matched by marker):
+
+| Type     | Name queried                                     | Marker        |
+|----------|--------------------------------------------------|---------------|
+| SPF      | `<host>`                                          | `v=spf1`      |
+| DMARC    | `_dmarc.<host>`                                    | `v=DMARC1`    |
+| MTA‑STS  | `_mta-sts.<host>`                                  | `v=STSv1`     |
+| TLS‑RPT  | `_smtp._tls.<host>`                                | `v=TLSRPTv1`  |
+| BIMI     | `default._bimi.<host>`                             | `v=BIMI1`     |
+| DKIM     | put the **full selector name** in `hostname`      | `v=DKIM1`     |
+
+> CNAME values are the **canonical target** (alias). A name with a CNAME cannot
+> have other records and may point to a chain — e.g. `shop.example.it , CNAME ,
+> www.example.it`.
+
+---
+
+## Compound values (`&` / `|`)
+
+The expected value may combine multiple values (operators must be space‑delimited):
+
+- **`a & b`** → **both** values required (extra records are still allowed → a
+  *warning*, like the single‑value case).
+- **`a | b`** → **at least one** of the values **and only the listed values are
+  allowed** (closed set). Example: with `a | b`, a returned set of `a & b` is
+  accepted, while `a & c` is **rejected** (`c` is not an allowed value).
+
+Mixing both operators in one cell is rejected as an invalid row. A literal `a&b`
+without surrounding spaces stays a single value (e.g. inside a TXT record).
+
+---
+
+## How a result is decided
+
+For each authoritative nameserver, the returned values are compared to the
+expectation (contains / `&` / `|`). The per‑host status aggregates them:
+
+| Status      | Meaning                                                              |
+|-------------|---------------------------------------------------------------------|
+| **ok**      | all nameservers return the expected value(s), no extra records       |
+| **warning** | all match, but extra records are present (or local‑resolver fallback) |
+| **error**   | a mismatch, an unreachable nameserver, or inconsistency between NS    |
+
+Comparisons are normalized: case‑insensitive, trailing‑dot tolerant; MX compared
+as `priority host`; TXT segment‑aware.
+
+---
+
+## Batches & single check
+
+- **Batches** run asynchronously with live progress; you can **STOP** a running
+  batch (remaining items become *cancelled*).
+- A **soft limit** of 150 records per batch warns but does not block.
+- The last **10** batches are retained (SQLite on the `dns_data` volume);
+  batches left "running" after a restart are marked *interrupted*.
+- **Re‑run** clones a batch into a new run (duplicated in history).
+- The home page also has a **single‑record** check (`POST /api/check`) for quick
+  ad‑hoc verification.
+
+---
+
+## API
+
+Base path `/api`; interactive docs at `/api/docs`.
+
+| Method | Endpoint                          | Description                               |
+|--------|-----------------------------------|-------------------------------------------|
+| GET    | `/health`                         | Service status                            |
+| GET    | `/config`                         | Client configuration                      |
+| GET    | `/record-types`                   | Supported record types                    |
+| GET    | `/template?format=xlsx\|csv`      | Sample input template                     |
+| POST   | `/check`                          | Synchronous single‑record check           |
+| GET    | `/batches`                        | Last 10 batches                           |
+| POST   | `/batches`                        | Upload file + start a batch (multipart)   |
+| GET    | `/batches/:id`                    | Full batch with results                   |
+| GET    | `/batches/:id/status`             | Progress (for polling)                    |
+| GET    | `/batches/:id/groups`             | Results grouped by secondary‑level domain |
+| POST   | `/batches/:id/stop`               | Request cancellation                      |
+| POST   | `/batches/:id/rerun`              | Re‑run (duplicate into history)           |
+| DELETE | `/batches/:id`                    | Delete a batch                            |
+| GET    | `/batches/:id/export?format=...`  | Download results (incl. NS queried)       |
+
+---
+
+## Configuration
+
+All via environment variables (Docker reads `.env`; see `.env.example`).
+
+| Variable                   | Default               | Description                                   |
+|----------------------------|-----------------------|-----------------------------------------------|
+| `WEB_PORT`                 | `8080`                | Host port for the UI                          |
+| `PORT`                     | `3001`                | Internal backend port                         |
+| `DATA_DIR`                 | `/data`               | SQLite directory                              |
+| `DNS_TIMEOUT_MS`           | `5000`                | Per‑query timeout                             |
+| `DNS_TRIES`                | `2`                   | Resolver tries (fallback path)               |
+| `DNS_HOST_CONCURRENCY`     | `8`                   | Hostnames checked in parallel                 |
+| `DNS_MAX_RETRIES`          | `10`                  | Retries on transient errors                   |
+| `DNS_BACKOFF_MS`           | `100,500,1000,2000`   | Backoff between retries (last value repeats)   |
+| `DNS_FORCE_LOCAL_RESOLVER` | `false`               | Skip the root path; always use local resolver  |
+| `DNS_FALLBACK_SERVERS`     | *(empty)*             | Resolver IP(s) for the fallback path           |
+| `SOFT_MAX_RECORDS`         | `150`                 | Soft cap on records per batch                  |
+| `MAX_UPLOAD_BYTES`         | `10485760`            | Max upload size                                |
+| `MAX_BATCHES`              | `10`                  | Batches retained in history                    |
+
+---
+
+## Network requirements
+
+Because resolution goes **root → TLD → authoritative**, the **server container
+needs outbound `UDP/53` (and `TCP/53` for large answers) to arbitrary internet
+IPs** — not just to an internal resolver. This is the price of guaranteed
+freshness.
+
+If your environment only permits DNS to a fixed resolver, set
+`DNS_FORCE_LOCAL_RESOLVER=true` (optionally with `DNS_FALLBACK_SERVERS=10.0.0.53`)
+to use that resolver. Results obtained this way are flagged as non‑authoritative
+and possibly stale.
+
+---
+
+## Dependency security notes
+
+`npm audit` reports a few **transitive** advisories that are **not exploitable**
+here:
+
+- **server** — `exceljs` → `uuid <11.1.1` (moderate): only affects UUID v3/v5/v6
+  with a `buf` argument; exceljs uses v4 without it. (The original `xlsx`/SheetJS
+  high‑severity ReDoS in the file‑parsing path was removed by switching to
+  `exceljs`.)
+- **web** — `vite` → `esbuild` (moderate/high): affects only the **Vite dev
+  server**. Production serves static files via nginx; Vite/esbuild are not in the
+  runtime image.
+
+---
+
+## Project structure
+
+```text
+batch-dns-checker/
 ├── docker-compose.yml
 ├── .env.example
-├── server/                 # API Express + TypeScript
+├── samples/esempio-dns.csv
+├── server/                       # Express + TypeScript API
 │   ├── src/
-│   │   ├── services/       # dnsChecker, batchRunner, fileParser, exporter, template
-│   │   ├── routes/         # batches, meta
-│   │   ├── db/             # SQLite
-│   │   ├── utils/          # domain (Public Suffix List)
-│   │   └── openapi.ts      # spec OpenAPI
+│   │   ├── services/
+│   │   │   ├── dnsClient.ts          # low-level UDP/TCP DNS (RD=0, EDNS)
+│   │   │   ├── iterativeResolver.ts  # root → TLD → domain delegation
+│   │   │   ├── recursiveFallback.ts  # local-resolver fallback
+│   │   │   ├── dnsChecker.ts         # discovery + compare + aggregate
+│   │   │   ├── batchRunner.ts        # async/stop/persist/rerun
+│   │   │   ├── fileParser.ts         # CSV/XLSX parsing
+│   │   │   ├── exporter.ts           # XLSX/CSV export
+│   │   │   └── template.ts           # demo template
+│   │   ├── routes/                   # batches, checks, meta
+│   │   ├── db/database.ts            # SQLite (last 10)
+│   │   ├── utils/                    # domain (PSL), retry
+│   │   └── openapi.ts                # OpenAPI spec
 │   └── Dockerfile
-└── web/                    # React + Ant Design (Vite)
+└── web/                          # React + Ant Design (Vite)
     ├── src/
-    │   ├── pages/          # Upload, Batch, History
-    │   ├── components/     # ResultsTable, StatusTag, ...
-    │   ├── api/            # client + tipi
-    │   └── i18n/           # it.json, en.json
+    │   ├── pages/                    # Upload (home), Batch, History
+    │   ├── components/               # ResultsTable, StatusTag, …
+    │   ├── api/                      # client + types
+    │   └── i18n/                     # it.json, en.json
     ├── nginx.conf
     └── Dockerfile
 ```
