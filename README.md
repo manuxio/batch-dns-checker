@@ -193,19 +193,32 @@ docker compose down -v     # stop and wipe stored batches
 
 A ready‑to‑upload sample is provided at [`samples/esempio-dns.csv`](samples/esempio-dns.csv).
 
-### Run from published images (GHCR)
+### Run from published images (no clone, no build)
 
-Each `vX.Y.Z` release publishes the images to the GitHub Container Registry, so
-you can deploy without building:
+The whole stack is published to GHCR. Start it with a single command using the
+**OCI compose artifact** — no repo checkout, no local file:
 
 ```bash
-export IMAGE_TAG=1.0.0          # or "latest"
-docker compose -f docker-compose.ghcr.yml pull
-docker compose -f docker-compose.ghcr.yml up -d
+docker compose -f oci://ghcr.io/manuxio/batch-dns-checker:compose up -d
 ```
 
-Images: `ghcr.io/manuxio/batch-dns-checker-server` and
-`ghcr.io/manuxio/batch-dns-checker-web` (tags: `X.Y.Z`, `X.Y`, `X`, `latest`).
+Alternatives that also avoid cloning:
+
+```bash
+# Pipe the compose file straight from the repo into stdin
+curl -fsSL https://raw.githubusercontent.com/manuxio/batch-dns-checker/main/docker-compose.ghcr.yml \
+  | docker compose -p coni-dns-checker -f - up -d
+
+# Or, with a local copy of docker-compose.ghcr.yml
+IMAGE_TAG=1.0.0 docker compose -f docker-compose.ghcr.yml up -d
+```
+
+Override `WEB_PORT` (host port, default 8080) and `IMAGE_TAG` (default `latest`)
+as environment variables. Published artifacts:
+
+- `ghcr.io/manuxio/batch-dns-checker-server` — API image (tags `X.Y.Z`, `X.Y`, `X`, `latest`)
+- `ghcr.io/manuxio/batch-dns-checker-web` — web image (same tags)
+- `ghcr.io/manuxio/batch-dns-checker:compose` — the OCI compose artifact
 
 ---
 
