@@ -1,10 +1,11 @@
-import { Resolver } from 'node:dns/promises';
-import { config } from '../config';
+import { getRegistrableDomain, normalizeHostname } from '../utils/domain';
+import { withRetry } from '../utils/retry';
+import { dnsQuery, type DnsRecord } from './dnsClient';
 import {
-  buildZoneCandidates,
-  getRegistrableDomain,
-  normalizeHostname,
-} from '../utils/domain';
+  createResolveCache,
+  findAuthoritativeServers,
+  type ResolveCache,
+} from './iterativeResolver';
 import type {
   CheckRow,
   HostResult,
@@ -14,192 +15,24 @@ import type {
 } from '../types';
 
 /**
- * Core DNS verification logic.
+ * Core DNS verification logic for a compliance checker.
  *
  * For each expectation we:
- *  1. locate the closest zone cut and read its authoritative NS set,
- *  2. resolve each NS hostname to an IP,
- *  3. query EACH authoritative NS directly for the record,
- *  4. compare the answer to the expected value (contains-match, warn on extras),
- *  5. aggregate into an overall status for the host.
+ *  1. start from the root servers and follow the delegation chain to find the
+ *     domain's authoritative nameservers (root -> TLD -> domain),
+ *  2. query EACH authoritative nameserver DIRECTLY (recursion disabled), so the
+ *     answer is the freshest possible and never served from a recursive cache,
+ *  3. compare the answer to the expected value (contains / AND / OR semantics),
+ *  4. aggregate into an overall status for the host.
  */
 
-/** DNS error codes that represent a definitive "no such record" answer. */
-const NEGATIVE_CODES = new Set(['ENODATA', 'ENOTFOUND', 'NXDOMAIN']);
-
-/** Transient DNS error codes worth retrying with backoff. */
-const RETRYABLE_CODES = new Set([
-  'ETIMEOUT',
-  'ETIMEDOUT',
-  'ECONNREFUSED',
-  'ECONNRESET',
-  'ESERVFAIL',
-  'EREFUSED',
-  'EAI_AGAIN',
-  'ENOMEM',
-]);
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-/** Backoff for a given retry number (1-based); the last entry repeats. */
-function backoffForRetry(retry: number): number {
-  const table = config.dnsBackoffMs;
-  return table[Math.min(retry - 1, table.length - 1)];
-}
-
-/**
- * Runs a DNS operation, retrying transient resolution errors up to
- * `dnsMaxRetries` times with the configured backoff (default 100ms, 500ms, 1s,
- * 2s, then 2s for any further retries). Definitive negatives (NXDOMAIN/NODATA)
- * are surfaced immediately without retrying.
- */
-async function withRetry<T>(operation: () => Promise<T>): Promise<T> {
-  let lastError: unknown;
-  for (let attempt = 0; attempt <= config.dnsMaxRetries; attempt += 1) {
-    try {
-      return await operation();
-    } catch (err) {
-      lastError = err;
-      const code = (err as NodeJS.ErrnoException).code ?? '';
-      if (!RETRYABLE_CODES.has(code) || attempt === config.dnsMaxRetries) {
-        throw err;
-      }
-      await sleep(backoffForRetry(attempt + 1));
-    }
-  }
-  throw lastError;
-}
-
-/** A default (recursive) resolver used for discovery queries (NS, NS IPs). */
-function createDefaultResolver(): Resolver {
-  return new Resolver({ timeout: config.dnsTimeoutMs, tries: config.dnsTries });
-}
-
-/** A resolver pinned to a single authoritative nameserver IP. */
-function createPinnedResolver(ip: string): Resolver {
-  const resolver = new Resolver({
-    timeout: config.dnsTimeoutMs,
-    tries: config.dnsTries,
-  });
-  resolver.setServers([ip]);
-  return resolver;
-}
-
-/**
- * Per-batch cache so repeated lookups (many hosts share a zone / NS) are cheap.
- */
-export interface DnsCache {
-  zones: Map<string, string[]>; // candidate name -> NS names (possibly empty)
-  nsIps: Map<string, string[]>; // NS name -> IP addresses
-  soa: Map<string, string | null>; // candidate name -> SOA primary master
-}
-
+// Re-export the per-batch cache under the name callers already use.
+export type DnsCache = ResolveCache;
 export function createDnsCache(): DnsCache {
-  return { zones: new Map(), nsIps: new Map(), soa: new Map() };
+  return createResolveCache();
 }
 
-async function lookupNs(
-  resolver: Resolver,
-  name: string,
-  cache: DnsCache,
-): Promise<string[]> {
-  const cached = cache.zones.get(name);
-  if (cached) return cached;
-  try {
-    const ns = (await withRetry(() => resolver.resolveNs(name))).map(
-      normalizeHostname,
-    );
-    cache.zones.set(name, ns);
-    return ns;
-  } catch {
-    cache.zones.set(name, []);
-    return [];
-  }
-}
-
-/** Returns the SOA primary master (MNAME) for a name, or null. */
-async function lookupSoaPrimary(
-  resolver: Resolver,
-  name: string,
-  cache: DnsCache,
-): Promise<string | null> {
-  const cached = cache.soa.get(name);
-  if (cached !== undefined) return cached;
-  try {
-    const soa = await withRetry(() => resolver.resolveSoa(name));
-    const primary = soa.nsname ? normalizeHostname(soa.nsname) : null;
-    cache.soa.set(name, primary);
-    return primary;
-  } catch {
-    cache.soa.set(name, null);
-    return null;
-  }
-}
-
-export interface ZoneLookup {
-  zone: string | null;
-  nameservers: string[];
-  /** True when NS records were absent and we fell back to the SOA primary. */
-  viaSoa: boolean;
-}
-
-/**
- * Finds the authoritative nameservers for a hostname.
- *  1) Walk from the most specific candidate zone down to the registrable domain
- *     and return the first name that publishes NS records (the normal case).
- *  2) Fallback: some zones are delegated but publish no apex NS records (only an
- *     SOA). In that case resolve the SOA of the closest enclosing zone and use
- *     its primary master, so the records can still be verified.
- */
-async function findAuthoritativeNameservers(
-  hostname: string,
-  resolver: Resolver,
-  cache: DnsCache,
-): Promise<ZoneLookup> {
-  const candidates = buildZoneCandidates(hostname);
-
-  for (const candidate of candidates) {
-    const ns = await lookupNs(resolver, candidate, cache);
-    if (ns.length > 0) {
-      return { zone: candidate, nameservers: ns, viaSoa: false };
-    }
-  }
-
-  for (const candidate of candidates) {
-    const primary = await lookupSoaPrimary(resolver, candidate, cache);
-    if (primary) {
-      return { zone: candidate, nameservers: [primary], viaSoa: true };
-    }
-  }
-
-  return { zone: null, nameservers: [], viaSoa: false };
-}
-
-async function resolveNsIps(
-  resolver: Resolver,
-  nsName: string,
-  cache: DnsCache,
-): Promise<string[]> {
-  const cached = cache.nsIps.get(nsName);
-  if (cached) return cached;
-  const ips: string[] = [];
-  try {
-    ips.push(...(await withRetry(() => resolver.resolve4(nsName))));
-  } catch {
-    /* no A records */
-  }
-  try {
-    ips.push(...(await withRetry(() => resolver.resolve6(nsName))));
-  } catch {
-    /* no AAAA records */
-  }
-  cache.nsIps.set(nsName, ips);
-  return ips;
-}
-
-/** Strips surrounding quotes and collapses internal whitespace for TXT/CAA. */
+/** Strips surrounding quotes for TXT/CAA values. */
 function unquote(value: string): string {
   return value.trim().replace(/^"(.*)"$/s, '$1');
 }
@@ -228,6 +61,11 @@ const POLICY_TYPES: Partial<Record<RecordType, PolicyType>> = {
 
 export function isPolicyType(type: RecordType): boolean {
   return type in POLICY_TYPES;
+}
+
+/** The DNS wire type actually queried (policy types are TXT under the hood). */
+function wireType(type: RecordType): string {
+  return POLICY_TYPES[type] ? 'TXT' : type;
 }
 
 /** Resolves the actual FQDN to query for a (possibly policy) record type. */
@@ -287,54 +125,62 @@ export function normalizeExpected(type: RecordType, rawValue: string): string {
   }
 }
 
-/** Queries one record type at a pinned resolver and returns normalized values. */
-async function queryRecord(
-  resolver: Resolver,
-  hostname: string,
-  type: RecordType,
-): Promise<string[]> {
-  const policy = POLICY_TYPES[type];
-  if (policy) {
-    // Policy records are TXT; keep only the TXT matching the policy marker so
-    // unrelated TXT records at the same name aren't treated as extras.
-    const txts = (await resolver.resolveTxt(hostname)).map((chunks) =>
-      unquote(chunks.join('')),
-    );
-    return txts.filter((t) => t.trim().toLowerCase().startsWith(policy.marker));
+/** Joins the (possibly chunked) data of a TXT record into a single string. */
+function txtToString(data: unknown): string {
+  if (Array.isArray(data)) {
+    return data
+      .map((d) => (Buffer.isBuffer(d) ? d.toString('utf8') : String(d)))
+      .join('');
   }
+  if (Buffer.isBuffer(data)) return data.toString('utf8');
+  return String(data);
+}
+
+/** Normalizes one returned wire record into the comparable string form. */
+function normalizeAnswer(type: RecordType, data: unknown): string {
   switch (type) {
     case 'A':
-      return (await resolver.resolve4(hostname)).map((v) => v.toLowerCase());
     case 'AAAA':
-      return (await resolver.resolve6(hostname)).map((v) => v.toLowerCase());
+      return String(data).toLowerCase();
     case 'CNAME':
-      return (await resolver.resolveCname(hostname)).map(normalizeHostname);
     case 'NS':
-      return (await resolver.resolveNs(hostname)).map(normalizeHostname);
-    case 'MX':
-      return (await resolver.resolveMx(hostname)).map(
-        (r) => `${r.priority} ${normalizeHostname(r.exchange)}`,
-      );
+      return normalizeHostname(String(data));
+    case 'MX': {
+      const d = data as { preference: number; exchange: string };
+      return `${d.preference} ${normalizeHostname(String(d.exchange))}`;
+    }
+    case 'SRV': {
+      const d = data as {
+        priority: number;
+        weight: number;
+        port: number;
+        target: string;
+      };
+      return `${d.priority} ${d.weight} ${d.port} ${normalizeHostname(String(d.target))}`;
+    }
+    case 'CAA': {
+      const d = data as { flags?: number; tag: string; value: string };
+      return `${d.flags ?? 0} ${String(d.tag).toLowerCase()} ${unquote(String(d.value))}`;
+    }
     case 'TXT':
-      return (await resolver.resolveTxt(hostname)).map((chunks) =>
-        unquote(chunks.join('')),
-      );
-    case 'SRV':
-      return (await resolver.resolveSrv(hostname)).map(
-        (r) =>
-          `${r.priority} ${r.weight} ${r.port} ${normalizeHostname(r.name)}`,
-      );
-    case 'CAA':
-      return (await resolver.resolveCaa(hostname)).map((r) => {
-        const flags = r.critical ?? 0;
-        if (r.issue !== undefined) return `${flags} issue ${r.issue}`;
-        if (r.issuewild !== undefined) return `${flags} issuewild ${r.issuewild}`;
-        if (r.iodef !== undefined) return `${flags} iodef ${r.iodef}`;
-        return `${flags} ${JSON.stringify(r)}`;
-      });
+      return unquote(txtToString(data));
     default:
-      return [];
+      return String(data);
   }
+}
+
+/** Extracts and normalizes the returned values of the requested type. */
+function extractValues(type: RecordType, answers: DnsRecord[]): string[] {
+  const policy = POLICY_TYPES[type];
+  if (policy) {
+    return answers
+      .filter((r) => r.type === 'TXT')
+      .map((r) => unquote(txtToString(r.data)))
+      .filter((t) => t.trim().toLowerCase().startsWith(policy.marker));
+  }
+  return answers
+    .filter((r) => r.type === type)
+    .map((r) => normalizeAnswer(type, r.data));
 }
 
 /** True when the expected value is satisfied by an MX query without priority. */
@@ -439,38 +285,47 @@ function evaluateMatch(exp: Expectation, returned: string[]): MatchOutcome {
 
 interface SingleNsResult {
   status: NsAnswer['status'];
+  nsIp: string | null;
   returnedValues: string[];
   extraValues: string[];
   error?: string;
 }
 
-async function checkAgainstNs(
+/** Queries one authoritative nameserver directly (RD=0) and compares. */
+async function querySingleIp(
   ip: string,
-  hostname: string,
+  queryName: string,
   type: RecordType,
   expectation: Expectation,
 ): Promise<SingleNsResult> {
-  const resolver = createPinnedResolver(ip);
   try {
-    const returnedValues = await withRetry(() =>
-      queryRecord(resolver, hostname, type),
-    );
+    const response = await withRetry(() => dnsQuery(ip, queryName, wireType(type)));
+    if (response.rcode !== 'NOERROR' && response.rcode !== 'NXDOMAIN') {
+      // SERVFAIL / REFUSED / ... : the server could not answer authoritatively.
+      return {
+        status: 'error',
+        nsIp: ip,
+        returnedValues: [],
+        extraValues: [],
+        error: response.rcode,
+      };
+    }
+    // NXDOMAIN / NODATA -> empty -> handled as a mismatch by evaluateMatch.
+    const returnedValues = extractValues(type, response.answers);
     const { matched, extraValues } = evaluateMatch(expectation, returnedValues);
     return {
       status: matched ? 'ok' : 'mismatch',
+      nsIp: ip,
       returnedValues,
       extraValues,
     };
   } catch (err) {
     const error = err as NodeJS.ErrnoException;
     const code = error.code ?? '';
-    // A definitive "no such record" is a mismatch, not an infrastructure error.
-    if (NEGATIVE_CODES.has(code)) {
-      return { status: 'mismatch', returnedValues: [], extraValues: [] };
-    }
     const isTimeout = code === 'ETIMEOUT' || code === 'ETIMEDOUT';
     return {
       status: isTimeout ? 'timeout' : 'error',
+      nsIp: ip,
       returnedValues: [],
       extraValues: [],
       error: code || error.message,
@@ -478,7 +333,38 @@ async function checkAgainstNs(
   }
 }
 
-/** Runs a full check for a single expectation across all authoritative NS. */
+/**
+ * Queries a nameserver, trying its IPs in order (IPv4 first) until one answers,
+ * so an unreachable IPv6 address falls through to a working IPv4 one.
+ */
+async function checkAgainstNs(
+  ips: string[],
+  queryName: string,
+  type: RecordType,
+  expectation: Expectation,
+): Promise<SingleNsResult> {
+  let last: SingleNsResult | null = null;
+  for (const ip of ips) {
+    const result = await querySingleIp(ip, queryName, type, expectation);
+    // A network-level failure on this IP -> try the next; keep real answers.
+    if (result.status === 'error' || result.status === 'timeout') {
+      last = result;
+      continue;
+    }
+    return result;
+  }
+  return (
+    last ?? {
+      status: 'error',
+      nsIp: null,
+      returnedValues: [],
+      extraValues: [],
+      error: 'noReachableIp',
+    }
+  );
+}
+
+/** Runs a full check for a single expectation across ALL authoritative NS. */
 export async function checkHost(
   row: CheckRow,
   cache: DnsCache,
@@ -488,7 +374,6 @@ export async function checkHost(
   const expectation = parseExpectation(row.type, row.expectedValue);
   // Policy types (DMARC, MTA-STS, ...) are queried at a conventional sub-name.
   const queryName = resolveQueryName(row.type, inputHostname);
-  const defaultResolver = createDefaultResolver();
 
   const base: HostResult = {
     hostname: inputHostname,
@@ -504,57 +389,47 @@ export async function checkHost(
     warnings: [],
   };
 
-  const { zone, nameservers, viaSoa } = await findAuthoritativeNameservers(
-    queryName,
-    defaultResolver,
-    cache,
-  );
-  base.zone = zone;
-  base.authoritativeNameservers = nameservers;
+  const auth = await findAuthoritativeServers(queryName, cache);
+  base.zone = auth.zone;
+  base.authoritativeNameservers = auth.servers.map((s) => s.name);
 
-  if (nameservers.length === 0) {
+  if (auth.servers.length === 0) {
     base.status = 'error';
     base.message = 'noAuthoritativeNameservers';
     return base;
   }
 
-  const nsAnswers: NsAnswer[] = [];
-  for (const nsName of nameservers) {
-    const ips = await resolveNsIps(defaultResolver, nsName, cache);
-    if (ips.length === 0) {
-      nsAnswers.push({
-        nsName,
-        nsIp: null,
-        status: 'error',
-        returnedValues: [],
-        extraValues: [],
-        error: 'nsIpResolutionFailed',
-      });
-      continue;
-    }
-    // Query the first reachable IP for this nameserver.
-    const result = await checkAgainstNs(ips[0], queryName, row.type, expectation);
-    nsAnswers.push({
-      nsName,
-      nsIp: ips[0],
-      status: result.status,
-      returnedValues: result.returnedValues,
-      extraValues: result.extraValues,
-      error: result.error,
-    });
-  }
+  // Query EVERY authoritative nameserver directly, in parallel, for freshness.
+  base.nsAnswers = await Promise.all(
+    auth.servers.map(async (server): Promise<NsAnswer> => {
+      if (server.ips.length === 0) {
+        return {
+          nsName: server.name,
+          nsIp: null,
+          status: 'error',
+          returnedValues: [],
+          extraValues: [],
+          error: 'nsIpResolutionFailed',
+        };
+      }
+      const result = await checkAgainstNs(
+        server.ips,
+        queryName,
+        row.type,
+        expectation,
+      );
+      return {
+        nsName: server.name,
+        nsIp: result.nsIp,
+        status: result.status,
+        returnedValues: result.returnedValues,
+        extraValues: result.extraValues,
+        error: result.error,
+      };
+    }),
+  );
 
-  base.nsAnswers = nsAnswers;
-  const result = aggregate(base);
-
-  // The zone publishes no apex NS records; we verified against the SOA primary
-  // master only. Surface it as an advisory without hiding a correct value.
-  if (viaSoa) {
-    result.warnings.push('noApexNsRecords');
-    if (result.status === 'ok') result.status = 'warning';
-  }
-
-  return result;
+  return aggregate(base);
 }
 
 /** Combines per-NS answers into the overall host status + warnings. */

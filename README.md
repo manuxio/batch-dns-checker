@@ -146,11 +146,16 @@ corrisponde all'endpoint `POST /api/check`.
 
 ## Logica di verifica
 
-Per ogni riga:
+Per ogni riga la risoluzione parte **sempre dai root server** e segue la catena
+di delega, in modo da ottenere il dato **più fresco possibile** (essenziale per
+verificare la compliance di terze parti):
 
-1. si individua la **zona** (delegation point) più specifica e il suo set di NS
-   autoritativi (Public Suffix List per il dominio registrabile);
-2. si interroga **ogni** NS autoritativo direttamente;
+1. risoluzione **iterativa dai root** (root → TLD → dominio) per individuare i
+   name server autoritativi del dominio. Gli NS provengono dalla **delega del
+   genitore**, quindi la scoperta funziona anche se la zona non pubblica i record
+   NS all'apex;
+2. si interroga **ogni** name server autoritativo **direttamente, con ricorsione
+   disabilitata (RD=0)**: nessun resolver ricorsivo, nessuna cache intermedia;
 3. il valore atteso è confrontato in modalità **"contains"** (corretto se il
    valore atteso è presente; eventuali record extra generano un **avviso**);
 4. gli esiti dei singoli NS vengono aggregati:
