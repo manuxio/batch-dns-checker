@@ -148,7 +148,14 @@ export async function findAuthoritativeServers(
   const start = startingPoint(target, cache);
   let servers = start.servers;
   let currentZone = start.zone;
-  let lastDelegation: AuthLookup = { zone: null, servers: [] };
+  // When we start from a cached ancestor zone, those servers are already the
+  // authoritative answer for the target unless a deeper delegation is found.
+  // (Without this seed, a leaf record under a cached domain would wrongly
+  // resolve to "no authoritative nameservers".)
+  let lastDelegation: AuthLookup =
+    start.zone === ''
+      ? { zone: null, servers: [] }
+      : { zone: start.zone, servers: cache.zoneServers.get(start.zone) ?? [] };
   const seen = new Set<string>();
 
   for (let step = 0; step < 32; step += 1) {
