@@ -1,6 +1,6 @@
 {
   "name": "coni-svc-dns-checker-server",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "private": true,
   "description": "CONI SVC DNS Checker - backend API",
   "license": "UNLICENSED",

@@ -6,7 +6,7 @@ import { buildTemplateCsv, buildTemplateXlsx } from '../services/template';
 export const metaRouter = Router();
 
 const APP_NAME = 'CONI SVC DNS Checker';
-const APP_VERSION = '1.0.0';
+const APP_VERSION = '1.0.1';
 
 /** GET /api/health */
 metaRouter.get('/health', (_req, res) => {

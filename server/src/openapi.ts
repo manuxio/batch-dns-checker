@@ -8,7 +8,7 @@ export const openapiSpec = {
   openapi: '3.0.3',
   info: {
     title: 'CONI SVC DNS Checker API',
-    version: '1.0.0',
+    version: '1.0.1',
     description:
       'Verifies that hostnames resolve, on ALL their authoritative nameservers, ' +
       'to the expected record TYPE and VALUE. Checks run as batches; results are ' +
